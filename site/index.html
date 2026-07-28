@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>nixscroll &mdash; Declarative config for the scroll compositor, generated from structured Nix options</title>
+  <meta name="description" content="nixscroll is a planned home-manager module that will generate ~/.config/scroll/config for the scroll compositor (dawsers/scroll, a sway fork with a PaperWM-style scrolling layout) from structured Nix options instead of hand-edited config. Installs nothing — packaging is a platform backend's job. Includes a planned software-rendering profile for GPU-less machines. Pre-alpha, design stage: no module exists yet.">
+
+  <meta name="theme-color" content="#0b1120" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+
+  <meta property="og:title" content="nixscroll">
+  <meta property="og:description" content="A declarative config layer for the scroll compositor, generated from structured Nix options instead of hand-edited config. Design stage — the second compositor plugging into nixdesktop's shared policy layer.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://nixscroll.corbet.ch">
+
+  <link rel="stylesheet" href="https://v1.foss.design.corbet.ch/assets/base.css">
+  <link rel="stylesheet" href="./theme.css">
+</head>
+<body>
+
+<header class="hero">
+  <nav>
+    <a href="/" class="nav-brand">nixscroll</a>
+    <div class="nav-links">
+      <a href="https://github.com/julian-corbet/nixscroll-corbet-ch">GitHub</a>
+      <a href="#status">Status</a>
+      <a href="#roadmap">Roadmap</a>
+      <details class="nav-family">
+        <summary>nix* family</summary>
+        <nav class="nav-family-panel" aria-label="The nix* project family">
+          <a href="https://nixapps.corbet.ch">nixapps <span>cluster apps as typed Nix</span></a>
+          <a href="https://nixarch.corbet.ch">nixarch <span>Arch's AUR breadth, Nix's declarative config</span></a>
+          <a href="https://nixbackup.corbet.ch">nixbackup <span>verify the backup, not the exit code</span></a>
+          <a href="https://nixgpu.corbet.ch">nixgpu <span>share one GPU by priority</span></a>
+          <a href="https://nixk3s.corbet.ch">nixk3s <span>the host is a flake, the cluster is git</span></a>
+          <a href="https://nixllm.corbet.ch">nixllm <span>the model store IS the registry</span></a>
+          <a href="https://nixnas.corbet.ch">nixnas <span>declarative NAS on a USB stick</span></a>
+          <a href="https://nixnet.corbet.ch">nixnet <span>the best live path to a host</span></a>
+          <a href="https://nixniri.corbet.ch">nixniri <span>the KDL file you stopped hand-editing</span></a>
+          <a href="https://nixpush.corbet.ch">nixpush <span>one send call, any notification backend</span></a>
+          <a href="https://nixram.corbet.ch">nixram <span>RAM tuning that fits your machine</span></a>
+          <a href="https://nixremote.corbet.ch">nixremote <span>remote apps as real windows</span></a>
+          <a href="https://nixscroll.corbet.ch" aria-current="page">nixscroll <span>a scrolling column of windows, declared</span></a>
+          <a href="https://nixsh.corbet.ch">nixsh <span>every shell on every machine, declared</span></a>
+          <a href="https://nixshare.corbet.ch">nixshare <span>NFS/CIFS shares that unstick themselves</span></a>
+          <a href="https://nixvibe.corbet.ch">nixvibe <span>a coding agent in a browser terminal</span></a>
+          <a href="https://nixvps.corbet.ch">nixvps <span>NixOS on sub-1GB VPSes</span></a>
+        </nav>
+      </details>
+    </div>
+  </nav>
+
+  <div class="hero-content">
+    <h1>nixscroll</h1>
+    <p class="tagline">A scrolling column of windows, declared instead of hand-edited.</p>
+    <p class="subtitle">
+      A planned home-manager module around <a href="https://github.com/dawsers/scroll">scroll</a>
+      &mdash; a <code>sway</code> fork that trades i3-style fixed
+      workspaces for a niri-style infinite scrolling, PaperWM column
+      layout: generate a real <code>~/.config/scroll/config</code> from
+      typed options instead of hand-edited config, with a planned
+      software-rendering profile for machines with no GPU to speak of.
+      Same contract as the rest of this family: config only, no packages.
+    </p>
+    <div class="cta">
+      <a href="#status" class="btn btn-primary">Read the Status</a>
+      <a href="https://github.com/julian-corbet/nixscroll-corbet-ch" class="btn btn-secondary">View on GitHub</a>
+    </div>
+  </div>
+</header>
+
+<main>
+
+<section id="status" class="how-it-works">
+  <div class="container">
+    <h2>Status: pre-alpha, design stage &mdash; no module exists yet</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">!</div>
+        <h3>No line of this has touched a running scroll session yet</h3>
+        <p>
+          Unlike <a href="https://nixniri.corbet.ch">nixniri</a>, which
+          is moving already-running code out of nixdesktop,
+          <code>nixscroll</code> starts from zero: nixdesktop never
+          supported scroll, so there is no existing module to extract.
+          Everything described on this page is the intended option
+          surface, not yet verified against a live compositor. Treat it
+          as a design document, not a changelog.
+        </p>
+      </div>
+      <div class="step">
+        <div class="step-num">!</div>
+        <h3>The split this repo exists to test</h3>
+        <p>
+          nixdesktop's shared policy and chrome layer (role policy,
+          waybar, mako, swaylock, nwg-bar, eww, the idle/lock service)
+          was written against niri first. Whether that layer is actually
+          compositor-neutral, and not just designed with that intention,
+          only gets settled once a second compositor plugs into it for
+          real &mdash; that's the actual job this repo exists to do, not
+          a side effect of it.
+        </p>
+      </div>
+      <div class="step">
+        <div class="step-num">!</div>
+        <h3>Packaging is explicitly out of scope</h3>
+        <p>
+          <code>scroll</code> isn't in nixpkgs. Consumers currently reach
+          it through the community package flake
+          <a href="https://github.com/Diax170/scroll-flake">scroll-flake</a>.
+          <code>nixscroll</code> won't declare that as its own flake
+          input, for the same reason nixdesktop keeps noctalia out of
+          its inputs: a flake input is fetched on every evaluation, so
+          bundling a whole compositor-packaging flake would put it in
+          the closure of every consumer &mdash; including anyone who
+          already has scroll installed some other way.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="features">
+  <div class="container">
+    <h2>What it will generate</h2>
+    <div class="feature-grid">
+      <div class="feature">
+        <h3>A real sway-syntax config &mdash; not KDL</h3>
+        <p>
+          scroll is a fork of sway, so its config keeps sway/i3's classic
+          directive syntax, not niri's KDL. Worth calling out plainly:
+          nixscroll and nixniri do the identical job for sibling
+          compositors, but render two structurally different file
+          formats from two structurally different option shapes &mdash;
+          this module can't just reuse nixniri's KDL renderer.
+        </p>
+      </div>
+      <div class="feature">
+        <h3>Installs nothing</h3>
+        <p>
+          Same contract as every config-generation module in this
+          family: this module will assume the <code>scroll</code>
+          binary already exists and never name a package or an absolute
+          binary path itself. Getting scroll onto the box &mdash; via
+          scroll-flake, a platform backend, or however else &mdash; is
+          explicitly someone else's job.
+        </p>
+      </div>
+      <div class="feature">
+        <h3>Software-rendering profile</h3>
+        <p>
+          A planned opt-in profile setting whatever this fork actually
+          needs to fall back to software rendering (llvmpipe/pixman)
+          instead of a GPU render node &mdash; for a VM or a genuinely
+          GPU-less box. The same instinct behind nixdesktop's CPU-side
+          toolkit defaults, one layer further down the stack, at the
+          renderer itself rather than the toolkit above it. Not yet
+          measured against a real GPU-less machine &mdash; see Status.
+        </p>
+      </div>
+      <div class="feature">
+        <h3>Escape hatches, matching family convention</h3>
+        <p>
+          Planned raw-passthrough options for anything the structured
+          surface doesn't model yet, following the same "structure for
+          the common case, an escape hatch for everything else" pattern
+          as nixniri's <code>extraStartup</code>/<code>extraWindowRules</code>/<code>extraBinds</code>/<code>extraTopLevel</code>.
+        </p>
+      </div>
+      <div class="feature">
+        <h3>Compositor-neutral policy stays upstream</h3>
+        <p>
+          <a href="https://github.com/julian-corbet/nixdesktop-corbet-ch">nixdesktop</a>
+          keeps the role policy and the compositor-agnostic chrome
+          &mdash; waybar, mako, swaylock, nwg-bar, eww. This repo will
+          own exactly one thing: scroll's own config file.
+        </p>
+      </div>
+      <div class="feature">
+        <h3>Mechanism public, values private</h3>
+        <p>
+          No default will point at a specific hostname, monitor name, or
+          personal keybind layout. Every default is meant to be a
+          sensible one for any user &mdash; scroll's own upstream
+          defaults where they exist, not this author's own setup.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="install" class="install">
+  <div class="container">
+    <h2>The shape this will take</h2>
+    <p class="subtitle" style="margin-bottom: 1.5rem;">
+      Matching nixniri's own module shape &mdash; not a tested example
+      yet; see Status above.
+    </p>
+    <div class="install-grid">
+      <div class="install-method">
+        <h3>1. Add the flake input</h3>
+        <pre><code>inputs.nixscroll.url = "github:julian-corbet/nixscroll-corbet-ch";</code></pre>
+      </div>
+      <div class="install-method">
+        <h3>2. Import and configure</h3>
+        <pre><code>imports = [ inputs.nixscroll.homeManagerModules.scroll ];
+
+nixscroll.scroll = {
+  enable = true;
+  softwareRendering = true; # no GPU on this box
+};</code></pre>
+      </div>
+      <div class="install-method">
+        <h3>3. Provide the binary yourself</h3>
+        <p>
+          This module never installs <code>scroll</code>. Add
+          <a href="https://github.com/Diax170/scroll-flake">scroll-flake</a>
+          as your own input, or resolve it through whatever platform
+          backend your host already uses, and import both.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="architecture">
+  <div class="container">
+    <h2>Where this fits</h2>
+    <div class="arch-details">
+      <div class="arch-detail">
+        <h3>1. Compositor config &mdash; nixscroll / nixniri</h3>
+        <p>
+          Generates the compositor's own config file. Nothing else.
+          Doesn't know or care what bar you run, what notification
+          daemon you have, or what a "role" is.
+        </p>
+      </div>
+      <div class="arch-detail">
+        <h3>2. Policy + shared chrome &mdash; nixdesktop</h3>
+        <p>
+          Which roles a session wants filled (file manager, polkit
+          agent, notification daemon, bar), plus the compositor-agnostic
+          pieces: waybar, mako, swaylock, nwg-bar, eww, and the idle/lock
+          systemd service. Imports whichever compositor layer(s) a
+          machine actually uses.
+        </p>
+      </div>
+      <div class="arch-detail">
+        <h3>3. The hub</h3>
+        <p>
+          An actual machine's own config, importing nixdesktop plus
+          exactly one compositor layer, resolved into real installed
+          packages by a platform backend such as nixarch.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="roadmap" class="architecture">
+  <div class="container">
+    <h2>Roadmap (planned, not yet built)</h2>
+    <div class="arch-details">
+      <div class="arch-detail">
+        <h3>Write the actual module</h3>
+        <p>
+          <code>home/scroll.nix</code> doesn't exist yet. This page
+          describes the target option surface; writing it against a real
+          running scroll session, on real hardware, is next.
+        </p>
+      </div>
+      <div class="arch-detail">
+        <h3>Prove the software-rendering profile</h3>
+        <p>
+          Verified against a genuine GPU-less box, not assumed from
+          scroll's own docs &mdash; the same discipline nixremote applied
+          to hardware video encoding before calling it a default.
+        </p>
+      </div>
+      <div class="arch-detail">
+        <h3>Settle the packaging story</h3>
+        <p>
+          Whether a platform backend ends up wrapping
+          <a href="https://github.com/Diax170/scroll-flake">scroll-flake</a>,
+          or a consumer always adds it directly, is genuinely open.
+        </p>
+      </div>
+      <div class="arch-detail">
+        <h3>Prove nixdesktop's neutrality claim</h3>
+        <p>
+          A real config importing both nixdesktop and nixscroll (not
+          nixniri) side by side, confirming the shared chrome layer
+          doesn't secretly assume niri anywhere.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="container">
+    <div class="footer-links">
+      <a href="https://github.com/julian-corbet/nixscroll-corbet-ch">Source</a>
+      <a href="https://github.com/julian-corbet/nixscroll-corbet-ch/issues">Issues</a>
+    </div>
+    <p>
+      <a href="https://github.com/julian-corbet/nixscroll-corbet-ch/blob/main/LICENSE">MIT</a> &middot;
+      <a href="https://github.com/julian-corbet">Julian Corbet</a> &middot;
+      Built on <a href="https://github.com/dawsers/scroll">scroll</a> &middot;
+      packaging via <a href="https://github.com/Diax170/scroll-flake">scroll-flake</a>
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>

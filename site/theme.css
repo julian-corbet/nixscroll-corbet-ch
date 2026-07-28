@@ -1,0 +1,55 @@
+/* =====================================================================
+   nixscroll / site / theme.css
+   Project-specific theme override for the foss/v1 design system.
+   Only touches the tokens documented as "safe to override" in the
+   design-corbet-ch project-pages theming contract — retints the accent
+   hue to yellow, distinct from every sibling (nixvps amber, nixshare
+   orange, nixram emerald, nixremote lime, nixniri sky).
+
+   Load order:
+     <link rel="stylesheet" href="https://v1.foss.design.corbet.ch/assets/base.css">
+     <link rel="stylesheet" href="./theme.css">
+
+   Contrast (WCAG 2.1, both directions checked):
+     dark  #facc15 on #0b1120 = 12.30:1  · #0b1120 on #facc15 = 12.30:1
+     light #854d0e on #ffffff = 6.85:1   · #ffffff on #854d0e = 6.85:1
+   ===================================================================== */
+
+:root {
+  /* Dark mode (and default) accent — yellow-400. */
+  --accent: #facc15;
+  --accent-hover: #fde047;
+  --accent-dim: rgba(250, 204, 21, 0.12);
+  --accent-glow: rgba(250, 204, 21, 0.08);
+  --accent-text: #0b1120;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    /* Darker yellow for light mode — 6.85:1 on #ffffff, AA for normal
+       text (computed via WCAG relative luminance, not eyeballed). */
+    --accent: #854d0e;
+    --accent-hover: #713f12;
+    --accent-dim: rgba(133, 77, 14, 0.08);
+    --accent-glow: rgba(133, 77, 14, 0.06);
+    --accent-text: #ffffff;
+  }
+}
+
+/* Mirror both variants for the explicit data-theme toggle, so it wins
+   over the OS media query in both directions. */
+:root[data-theme="dark"] {
+  --accent: #facc15;
+  --accent-hover: #fde047;
+  --accent-dim: rgba(250, 204, 21, 0.12);
+  --accent-glow: rgba(250, 204, 21, 0.08);
+  --accent-text: #0b1120;
+}
+
+:root[data-theme="light"] {
+  --accent: #854d0e;
+  --accent-hover: #713f12;
+  --accent-dim: rgba(133, 77, 14, 0.08);
+  --accent-glow: rgba(133, 77, 14, 0.06);
+  --accent-text: #ffffff;
+}
