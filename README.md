@@ -148,3 +148,26 @@ scrolling layout instead of a grid-based compositor.
 ## License
 
 [MIT License](LICENSE) © 2026 Julian Corbet
+
+## Wiring nixdesktop's shared startup list
+
+[nixdesktop](https://github.com/julian-corbet/nixdesktop-corbet-ch) is the compositor-neutral
+policy layer. Its shared components — a notification daemon, a widget shell — append the commands
+they need to a neutral `nixdesktop.startup` list rather than writing into any compositor's
+namespace.
+
+**Nothing splices that list automatically.** A compositor module cannot read an option from a repo
+it does not depend on, so the consumer wires it, exactly as it wires nixniri's `idle.command` into
+nixdesktop's `session.idleAndLock.command`:
+
+```nix
+programs.scroll.startup = config.nixdesktop.startup;
+```
+
+If you import a nixdesktop component that populates `nixdesktop.startup` and forget this line, that
+component is configured and **silently never launches**. There is no error, because from scroll's
+point of view nothing is wrong. If something you configured is simply not running, check this first.
+
+`programs.scroll.startup` takes bare commands; each is emitted as an `exec` line. (niri's equivalent
+takes raw KDL, so the same list needs `map (c: ''spawn-sh-at-startup "${c}"'')` there — the shapes
+are not interchangeable.)
