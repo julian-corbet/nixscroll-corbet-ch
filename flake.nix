@@ -39,6 +39,13 @@
       nixosModules.scroll = import ./modules/nixos.nix { inherit self; };
       nixosModules.default = self.nixosModules.scroll;
 
+      # Arch/CachyOS plane. scroll is not in nixpkgs, so unlike niri it cannot be resolved through
+      # nixdesktop's role table -- on NixOS this repo's own package output fills that gap, and on
+      # Arch the AUR package does. Declares the name into nixarch.packages.aur; nixarch's
+      # reconciler installs it. Config generation stays in homeManagerModules.scroll on both.
+      systemManagerModules.scroll = ./modules/system-manager.nix;
+      systemManagerModules.default = self.systemManagerModules.scroll;
+
       # ── CONFIG GENERATION ────────────────────────────────────────────────────────────────
       # Writes ~/.config/scroll/config from structured options (namespace: programs.scroll).
       # Installs nothing — see README. Reads no package by default; the one place it optionally
