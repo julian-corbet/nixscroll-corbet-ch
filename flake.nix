@@ -55,6 +55,23 @@
         default = ./home/scroll.nix;
       };
 
+      # ── CHECKS ────────────────────────────────────────────────────────────────────────────
+      # `nix flake check` does NOT evaluate `homeManagerModules` or `systemManagerModules` — it
+      # lists them as unchecked and moves on. Since config generation is what this repo is FOR,
+      # a green `flake check` here covered the package passthrough and the NixOS module while
+      # proving nothing at all about home/scroll.nix. This closes that gap by evaluating the module
+      # for real against a minimal home-manager stub.
+      #
+      # Scoped to the `nixdesktop.startup` seam rather than being a full golden-file test of the
+      # rendered config: the seam is the part with a SILENT failure mode (a populated contract with
+      # no reader renders nothing and errors nowhere), and silent failures are what a check earns
+      # its keep on. A malformed bindsym, by contrast, surfaces the moment scroll starts.
+      checks = forAllSystems (system: {
+        startup-contract = import ./checks/startup-contract.nix {
+          pkgs = nixpkgs.legacyPackages.${system};
+        };
+      });
+
       formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixpkgs-fmt);
     };
 }

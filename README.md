@@ -156,18 +156,26 @@ policy layer. Its shared components — a notification daemon, a widget shell �
 they need to a neutral `nixdesktop.startup` list rather than writing into any compositor's
 namespace.
 
-**Nothing splices that list automatically.** A compositor module cannot read an option from a repo
-it does not depend on, so the consumer wires it, exactly as it wires nixniri's `idle.command` into
-nixdesktop's `session.idleAndLock.command`:
+**This module splices that list for you.** Nothing to wire: `home/scroll.nix` reads
+`config.nixdesktop.startup` defensively (`or [ ]`) and emits each entry as its own `exec` line,
+ordered ahead of anything you put in `programs.scroll.startup` — contract entries are session
+components a host's own commands may expect to be running already.
 
-```nix
-programs.scroll.startup = config.nixdesktop.startup;
-```
+If no nixdesktop module is in scope at all, the read yields an empty list and nothing extra is
+rendered. No flake input on nixdesktop is involved, and none is needed; this is the same
+defensive-read idiom nixboot uses for `nixstorage.layout` and nixhost uses for the facts it mirrors.
+The dependency stays one-way: nixdesktop declares the contract and knows nothing about scroll.
 
-If you import a nixdesktop component that populates `nixdesktop.startup` and forget this line, that
-component is configured and **silently never launches**. There is no error, because from scroll's
-point of view nothing is wrong. If something you configured is simply not running, check this first.
+> **This used to be your job, and it was a trap.** Earlier versions asked you to write
+> `programs.scroll.startup = config.nixdesktop.startup;` yourself, on the stated grounds that a
+> compositor module *cannot* read an option from a repo it does not depend on. That premise was
+> simply wrong — a defensive read needs no dependency. The cost of believing it was a silent
+> failure mode: forget the line and the component is fully configured, its files written, and it
+> never launches, with no error possible, because a populated list with no reader is a valid
+> configuration. `checks/startup-contract.nix` now asserts the splice in both directions, since
+> `nix flake check` does not evaluate `homeManagerModules` and so never covered this at all.
 
-`programs.scroll.startup` takes bare commands; each is emitted as an `exec` line. (niri's equivalent
-takes raw KDL, so the same list needs `map (c: ''spawn-sh-at-startup "${c}"'')` there — the shapes
-are not interchangeable.)
+`programs.scroll.startup` remains yours for the host's own commands, and still takes bare commands
+rather than raw config lines. (niri's native startup syntax takes raw KDL, so nixniri translates the
+same neutral list into `spawn-sh-at-startup` lines instead — each compositor module adapts the
+contract to its own syntax, which is the point of the contract being neutral.)

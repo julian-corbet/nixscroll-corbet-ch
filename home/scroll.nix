@@ -228,7 +228,31 @@ let
     "exec \"systemctl --user import-environment {,WAYLAND_}DISPLAY I3SOCK SWAYSOCK SCROLLSOCK; systemctl --user start scroll-session.target\""
     "exec ${scrollmsgBin} -t subscribe '[\"shutdown\"]' && systemctl --user stop scroll-session.target"
   ];
-  startupLines = systemdStartupLines ++ (map (c: "exec ${c}") cfg.startup);
+  # The neutral `nixdesktop.startup` contract, consumed rather than hand-wired.
+  #
+  # nixdesktop components (noctalia today) append what they need to a compositor-neutral list
+  # instead of writing sway/scroll `exec` lines directly. Translating that list was previously the
+  # CONSUMER's job, via a line this repo's README told them to copy:
+  #
+  #     programs.scroll.startup = config.nixdesktop.startup;
+  #
+  # Forget it and the failure is silent: the component is configured, its files land, and it never
+  # launches -- no error, because a populated list with no reader is a valid configuration. Both
+  # this README and nixniri's warned about it in prose, which is the tell that it should never have
+  # been the consumer's job in the first place.
+  #
+  # Read DEFENSIVELY (`or [ ]`), the same idiom nixhost uses for mirrored facts and nixboot uses
+  # for `nixstorage.layout`: a host running scroll with NO nixdesktop module sees an empty list and
+  # renders nothing extra, never an evaluation error. That keeps the dependency one-way --
+  # nixdesktop declares the contract and knows nothing about scroll; this module reads it and
+  # adapts. Reversing it (nixdesktop reading `programs.scroll.*`) would re-couple the neutral
+  # policy layer to one compositor by name, which is exactly what its split was for.
+  #
+  # Ordered BEFORE cfg.startup: contract entries are session components (a bar, a notifier, a
+  # polkit agent) that a host's own startup commands may reasonably expect to already be running.
+  neutralStartup = map (c: "exec ${c}") (config.nixdesktop.startup or [ ]);
+
+  startupLines = systemdStartupLines ++ neutralStartup ++ (map (c: "exec ${c}") cfg.startup);
 
   optionalIf = cond: v: if cond then v else null;
 
