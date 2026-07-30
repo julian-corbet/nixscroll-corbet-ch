@@ -140,7 +140,7 @@ binary.
 
 nixscroll is one of several small, independently-usable open-source projects sharing a common
 design system: [nixdesktop](https://github.com/julian-corbet/nixdesktop-corbet-ch) (a
-niri-based CPU-rendered desktop) and [nixremote](https://github.com/julian-corbet/nixremote-corbet-ch)
+a compositor-neutral CPU-rendered desktop policy layer) and [nixremote](https://github.com/julian-corbet/nixremote-corbet-ch)
 (declarative cross-machine Wayland app forwarding) cover adjacent ground on the same
 Wayland-on-Nix theme; nixscroll's own niche is scroll specifically, for anyone who wants its
 scrolling layout instead of a grid-based compositor.
