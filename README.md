@@ -149,6 +149,29 @@ scrolling layout instead of a grid-based compositor.
 
 [MIT License](LICENSE) © 2026 Julian Corbet
 
+## Idle and lock: not here, by design
+
+`programs.scroll` has no idle-timeout or screen-locker options, and should not grow any.
+[nixdesktop][nixdesktop] owns them — `nixdesktop.session.idleAndLock` takes `lockAfterSeconds`,
+`suspendAfterSeconds` and `lockCommand`, assembles the `swayidle` invocation, and runs it as a
+systemd user service.
+
+That is not an omission waiting to be filled. `swayidle`'s invocation is byte-identical under any
+wlroots compositor, and "lock after 30 minutes, never suspend" describes the *host*, not scroll's
+config syntax. Adding the options here would create a second copy of the same policy — one per
+compositor repo, free to drift. nixniri used to carry exactly that copy and has given it up.
+
+What is legitimately scroll's is the lock **keybind**. Since this repo ships no default bind table
+(`binds` starts empty and scroll's own upstream defaults apply), bind it yourself, reading the
+locker from the single place it is declared:
+
+```nix
+programs.scroll.binds."$mod+Alt+l" =
+  "exec ${config.nixdesktop.session.idleAndLock.lockCommand}";
+```
+
+[nixdesktop]: https://github.com/julian-corbet/nixdesktop-corbet-ch
+
 ## Wiring nixdesktop's shared startup list
 
 [nixdesktop](https://github.com/julian-corbet/nixdesktop-corbet-ch) is the compositor-neutral
