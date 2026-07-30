@@ -65,10 +65,23 @@
       # Scoped to the `nixdesktop.startup` seam rather than being a full golden-file test of the
       # rendered config: the seam is the part with a SILENT failure mode (a populated contract with
       # no reader renders nothing and errors nowhere), and silent failures are what a check earns
-      # its keep on. A malformed bindsym, by contrast, surfaces the moment scroll starts.
+      # its keep on.
+      #
+      # This block used to continue "a malformed bindsym, by contrast, surfaces the moment scroll
+      # starts". That was WRONG, and it is why `config-accepted` below now exists: scroll logs a
+      # rejected directive to stderr and carries on, both at startup and under `--validate`, which
+      # exits 0 regardless. A bad directive surfaces nowhere unless something greps for it.
       checks = forAllSystems (system: {
         startup-contract = import ./checks/startup-contract.nix {
           pkgs = nixpkgs.legacyPackages.${system};
+        };
+        # Runs the REAL binary against this module's own output. Everything else here is Nix
+        # inspecting Nix, which cannot notice that scroll disagrees -- and it did, about ten
+        # directives. See the check's header for why it greps stderr instead of trusting the
+        # exit code, and note this is the one check that costs a scroll build.
+        config-accepted = import ./checks/config-accepted.nix {
+          pkgs = nixpkgs.legacyPackages.${system};
+          scroll = self.packages.${system}.scroll;
         };
       });
 

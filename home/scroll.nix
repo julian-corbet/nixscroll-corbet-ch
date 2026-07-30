@@ -15,12 +15,18 @@
 # them already (see scroll's own /etc/scroll/config, installed by the package). Modeling one
 # option per mode name here would be modeling sway's modal-keymap feature, not scroll. Real
 # scroll config directives — the ones that don't exist in plain sway — get real options below
-# (layout_*, animations, jump_labels_*, gesture_scroll_*, snap_*, scale_workspace/scale_content
-# via bar, ...); keymaps of any kind, including overriding scroll's own named modes, go through
-# the generic `binds`/`modes` escape hatch.
+# (layout_*, animations, jump_labels_*, gesture_scroll_*, scale_workspace/scale_content via bar,
+# ...); keymaps of any kind, including overriding scroll's own named modes, go through the generic
+# `binds`/`modes` escape hatch.
+#
+# `snap_*` used to be listed above as one of those directives. It is not one: scroll has no
+# snapping feature, the five options that rendered it were written from an assumption, and every
+# one was rejected by the real binary the first time anybody asked it. checks/config-accepted.nix
+# now asks it on every build — see that file before adding an option here.
 { lib, config, ... }:
 let
   cfg = config.programs.scroll;
+  factsLib = import ../lib/facts.nix { inherit lib; };
 
   inherit (lib) mkEnableOption mkOption types mkIf mkMerge mkDefault optional optionals optionalString concatStringsSep concatMapStringsSep filter;
 
@@ -86,6 +92,26 @@ let
     (optionalIf (cfg.settings.focus.onWindowActivation != null) "focus_on_window_activation ${cfg.settings.focus.onWindowActivation}")
   ] ++ (map (name: "client.${name} ${cfg.settings.colors.${name}}") (lib.attrNames cfg.settings.colors));
 
+  # Every window-decoration class scroll actually accepts, established by feeding
+  # `client.<class> …` to the real binary one class at a time and checking for
+  # "Unknown/invalid command" -- NOT by reading sway's manual, which is how `sticky` and
+  # `sticky_focused` (both rejected by scroll) came to be documented here in the first place.
+  validColorClasses = [
+    "focused"
+    "focused_inactive"
+    "focused_tab_title"
+    "pinned"
+    "pinned_focused"
+    "selected"
+    "selected_focused"
+    "placeholder"
+    "unfocused"
+    "urgent"
+    "background"
+  ];
+  invalidColorClasses =
+    filter (n: !(lib.elem n validColorClasses)) (lib.attrNames cfg.settings.colors);
+
   # ── layout ────────────────────────────────────────────────────────────────────────────
   defaultModeParts = filter (x: x != null) [
     cfg.layout.defaultMode.position
@@ -105,8 +131,6 @@ let
     (optionalIf (cfg.layout.cycleSizeWrap != null) "cycle_size_wrap ${tf cfg.layout.cycleSizeWrap}")
     (optionalIf (cfg.layout.alignResetAuto != null) "align_reset_auto ${tf cfg.layout.alignResetAuto}")
     (optionalIf (cfg.layout.maximizeIfSingle != null) "maximize_if_single ${tf cfg.layout.maximizeIfSingle}")
-    (optionalIf (cfg.layout.centerHorizontalIfFits != null) "center_horizontal_if_fits ${tf cfg.layout.centerHorizontalIfFits}")
-    (optionalIf (cfg.layout.centerVerticalIfFits != null) "center_vertical_if_fits ${tf cfg.layout.centerVerticalIfFits}")
   ];
 
   # ── animations ────────────────────────────────────────────────────────────────────────
@@ -159,15 +183,6 @@ let
     (optionalIf (cfg.gestures.scroll.fingers != null) "gesture_scroll_fingers ${toString cfg.gestures.scroll.fingers}")
     (optionalIf (cfg.gestures.scroll.sensitivity != null) "gesture_scroll_sensitivity ${toString cfg.gestures.scroll.sensitivity}")
     (optionalIf (cfg.gestures.scroll.sensitivityMouse != null) "gesture_scroll_sensitivity_mouse ${toString cfg.gestures.scroll.sensitivityMouse}")
-  ];
-
-  # ── snapping ──────────────────────────────────────────────────────────────────────────
-  snappingLines = filter (x: x != null) [
-    (optionalIf (cfg.snapping.windowGap != null) "snap_window_gap ${toString cfg.snapping.windowGap}")
-    (optionalIf (cfg.snapping.workspaceGap != null) "snap_workspace_gap ${toString cfg.snapping.workspaceGap}")
-    (optionalIf (cfg.snapping.respectGapsInner != null) "snap_respect_gaps_inner ${tf cfg.snapping.respectGapsInner}")
-    (optionalIf (cfg.snapping.respectGapsOuter != null) "snap_respect_gaps_outer ${tf cfg.snapping.respectGapsOuter}")
-    (optionalIf (cfg.snapping.borderOverlap != null) "snap_border_overlap ${tf cfg.snapping.borderOverlap}")
   ];
 
   # ── xwayland ──────────────────────────────────────────────────────────────────────────
@@ -241,16 +256,32 @@ let
   # this README and nixniri's warned about it in prose, which is the tell that it should never have
   # been the consumer's job in the first place.
   #
-  # Read DEFENSIVELY (`or [ ]`), the same idiom nixhost uses for mirrored facts and nixboot uses
-  # for `nixstorage.layout`: a host running scroll with NO nixdesktop module sees an empty list and
-  # renders nothing extra, never an evaluation error. That keeps the dependency one-way --
-  # nixdesktop declares the contract and knows nothing about scroll; this module reads it and
-  # adapts. Reversing it (nixdesktop reading `programs.scroll.*`) would re-couple the neutral
-  # policy layer to one compositor by name, which is exactly what its split was for.
+  # Read through `lib.probeFact` (`lib/facts.nix`, vendored from
+  # [nixhost](https://github.com/julian-corbet/nixhost-corbet-ch)'s own copy) rather than a bare
+  # `config.nixdesktop.startup or [ ]`: a host running scroll with NO nixdesktop module composed
+  # sees an empty list and renders nothing extra, never an evaluation error -- same as before.
+  # What the bare form could not do is tell THAT case apart from "nixdesktop IS composed, but
+  # `startup` itself moved or was renamed" -- `startup` has a real `[ ]` default, so a rename
+  # would resolve to an empty list JUST AS SILENTLY as nixdesktop never having been imported at
+  # all, and a populated-but-unreachable list is exactly the failure mode this file's own header
+  # describes above (configured, files land, never launches, no error). `probeFact`'s warning
+  # (`config.warnings` below) is now the only thing that would ever tell anyone -- see
+  # `checks/startup-contract.nix`'s own fact-wiring group for the proof.
+  #
+  # This keeps the dependency one-way -- nixdesktop declares the contract and knows nothing about
+  # scroll; this module reads it and adapts. Reversing it (nixdesktop reading `programs.scroll.*`)
+  # would re-couple the neutral policy layer to one compositor by name, which is exactly what its
+  # split was for.
   #
   # Ordered BEFORE cfg.startup: contract entries are session components (a bar, a notifier, a
   # polkit agent) that a host's own startup commands may reasonably expect to already be running.
-  neutralStartup = map (c: "exec ${c}") (config.nixdesktop.startup or [ ]);
+  nixdesktopStartupProbe = factsLib.probeFact {
+    inherit config;
+    namespace = "nixdesktop";
+    path = [ "startup" ];
+    fallback = [ ];
+  };
+  neutralStartup = map (c: "exec ${c}") nixdesktopStartupProbe.value;
 
   startupLines = systemdStartupLines ++ neutralStartup ++ (map (c: "exec ${c}") cfg.startup);
 
@@ -263,7 +294,6 @@ let
     decorationLine
     (optionalIf (jumpLines != [ ]) (concatStringsSep "\n" jumpLines))
     (optionalIf (gestureLines != [ ]) (concatStringsSep "\n" gestureLines))
-    (optionalIf (snappingLines != [ ]) (concatStringsSep "\n" snappingLines))
     xwaylandLine
     (optionalIf (outputLines != [ ]) (concatStringsSep "\n" outputLines))
     (optionalIf (inputLines != [ ]) (concatStringsSep "\n" inputLines))
@@ -362,11 +392,17 @@ in
         example = { focused = "#15439e #4b4b4b #e0e0e0 #2e9ef4 #15439e"; };
         description = ''
           `client.<name> <border> <background> <text> [<indicator> [<child_border>]]` lines,
-          one per attribute. Keys are scroll/sway's window-decoration classes — `focused`,
-          `focused_inactive`, `focused_tab_title`, `pinned`, `pinned_focused`, `selected`,
-          `selected_focused`, `sticky`, `sticky_focused`, `placeholder`, `unfocused`,
-          `urgent`, or the single-argument `background`. See `man 5 scroll`'s CLIENT COLORS
-          section for the full list and meaning of each color slot.
+          one per attribute. Keys are scroll's window-decoration classes, and an unknown key is
+          rejected at build time (see `validColorClasses`) rather than silently emitting a
+          `client.<junk>` line the compositor refuses.
+
+          Valid: `focused`, `focused_inactive`, `focused_tab_title`, `pinned`, `pinned_focused`,
+          `selected`, `selected_focused`, `placeholder`, `unfocused`, `urgent`, and the
+          single-argument `background`.
+
+          NOT valid, despite appearing in sway's own documentation: `sticky` and `sticky_focused`.
+          Both were listed here until each class was probed against the real binary; scroll rejects
+          both with "Unknown/invalid command". Inheriting sway's manual is how they got here.
         '';
       };
       floatingModifier = mkOption {
@@ -466,16 +502,11 @@ in
         default = null;
         description = "`maximize_if_single`. Default (scroll's, when unset here) is `false`.";
       };
-      centerHorizontalIfFits = mkOption {
-        type = types.nullOr types.bool;
-        default = null;
-        description = "`center_horizontal_if_fits`. Default (scroll's, when unset here) is `true`.";
-      };
-      centerVerticalIfFits = mkOption {
-        type = types.nullOr types.bool;
-        default = null;
-        description = "`center_vertical_if_fits`. Default (scroll's, when unset here) is `true`.";
-      };
+      # NO centerHorizontalIfFits / centerVerticalIfFits. They rendered `center_horizontal_if_fits`
+      # and `center_vertical_if_fits`, which scroll rejects with "Unknown/invalid command" on every
+      # build available (1.12.7 and 1.13-dev alike). `center_horizontal`/`center_vertical` exist only
+      # as Lua-API modifier fields in scroll.5, not as config directives, so there is no correct
+      # spelling to move these to — the feature is not configurable from the config file at all.
     };
 
     animations = {
@@ -549,13 +580,9 @@ in
       sensitivityMouse = mkOption { type = types.nullOr num; default = null; description = "`gesture_scroll_sensitivity_mouse <number>`. Negative reverses direction."; };
     };
 
-    snapping = {
-      windowGap = mkOption { type = types.nullOr types.int; default = null; description = "`snap_window_gap <integer>` — floating-window drag-snap distance in pixels. 0 disables."; };
-      workspaceGap = mkOption { type = types.nullOr types.int; default = null; description = "`snap_workspace_gap <integer>`."; };
-      respectGapsInner = mkOption { type = types.nullOr types.bool; default = null; description = "`snap_respect_gaps_inner true|false`."; };
-      respectGapsOuter = mkOption { type = types.nullOr types.bool; default = null; description = "`snap_respect_gaps_outer true|false`."; };
-      borderOverlap = mkOption { type = types.nullOr types.bool; default = null; description = "`snap_border_overlap true|false`."; };
-    };
+    # NO `snapping` block. All five options rendered `snap_*` directives that scroll rejects on
+    # every build available; `snap` appears nowhere in any of scroll's five man pages. The whole
+    # family was written from a feature that this compositor does not have.
 
     bar = {
       enable = mkEnableOption "the scroll status bar (a `bar { ... }` block). No block is written at all unless this is true, regardless of the other bar.* options";
@@ -718,7 +745,33 @@ in
           assertion = cfg.decoration.shadow.offset == null || builtins.length cfg.decoration.shadow.offset == 2;
           message = "programs.scroll.decoration.shadow.offset must be exactly [ x y ] (2 elements).";
         }
+        {
+          # `colors` is free-form by necessity (the value is a raw color string, not a structure),
+          # so nothing about its TYPE can catch a misspelled class. Without this, a typo emits
+          # `client.focussed …`, scroll answers "Unknown/invalid command" on stderr, and then --
+          # the part that makes this worth an assertion -- EXITS 0 ANYWAY. A bad class is invisible
+          # at every layer that isn't a human reading the compositor's log.
+          assertion = invalidColorClasses == [ ];
+          message = ''
+            programs.scroll.settings.colors has ${toString (builtins.length invalidColorClasses)} unknown
+            window-decoration class(es): ${concatStringsSep ", " invalidColorClasses}
+
+            Valid classes: ${concatStringsSep ", " validColorClasses}
+
+            Note `sticky` and `sticky_focused` are NOT valid in scroll even though sway documents
+            them -- each class here was probed against the real binary rather than inherited from
+            sway's manual.
+          '';
+        }
       ];
+
+      # THE SHARED READ CONTRACT'S OWN OUTPUT: state (c) on `nixdesktop.startup` -- composed but
+      # renamed -- warns here, the one case the "populated list with no reader" failure mode this
+      # file's own header describes can otherwise never announce itself (a rename produces the
+      # SAME empty `[ ]` as nixdesktop never having been imported, and both render fine, with no
+      # error). See `nixdesktopStartupProbe`'s own comment above and
+      # `checks/startup-contract.nix`'s fact-wiring group for the proof.
+      warnings = nixdesktopStartupProbe.warnings;
 
       xdg.configFile."scroll/config".text = renderedConfig;
 

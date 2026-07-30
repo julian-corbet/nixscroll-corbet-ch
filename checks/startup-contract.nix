@@ -38,6 +38,19 @@ let
     config.nixdesktop.startup = [ "noctalia-shell -d" "some-agent --flag" ];
   };
 
+  # THE DECOY: nixdesktop's real option surface, renamed. Composes the SAME top-level
+  # `nixdesktop` namespace the real sibling would (so `config ? nixdesktop` reads true -- state
+  # (a), "not composed at all", must NOT be what this fixture exercises), with the specific path
+  # `home/scroll.nix`'s own probe reads (`startup`) missing, renamed to a plausible neighbour --
+  # proving state (c), composed-but-moved, actually warns through the real module.
+  contractRenamed = { lib, ... }: {
+    options.nixdesktop.autostart = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+    };
+    config.nixdesktop.autostart = [ "noctalia-shell -d" ];
+  };
+
   render = extra: (lib.evalModules {
     modules = [ stubs ../home/scroll.nix { programs.scroll.enable = true; } ] ++ extra;
     specialArgs = { inherit pkgs; };
