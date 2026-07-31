@@ -19,10 +19,9 @@
 # ...); keymaps of any kind, including overriding scroll's own named modes, go through the generic
 # `binds`/`modes` escape hatch.
 #
-# `snap_*` used to be listed above as one of those directives. It is not one: scroll has no
-# snapping feature, the five options that rendered it were written from an assumption, and every
-# one was rejected by the real binary the first time anybody asked it. checks/config-accepted.nix
-# now asks it on every build — see that file before adding an option here.
+# NO `snap_*` directives: scroll has no snapping feature. Five options rendering `snap_*` were
+# tried and every one was rejected by the real binary. `checks/config-accepted.nix` asks the real
+# binary on every build — see that file before adding an option here.
 { probeFact }:
 { lib, config, ... }:
 let
@@ -243,31 +242,20 @@ let
     "exec \"systemctl --user import-environment {,WAYLAND_}DISPLAY I3SOCK SWAYSOCK SCROLLSOCK; systemctl --user start scroll-session.target\""
     "exec ${scrollmsgBin} -t subscribe '[\"shutdown\"]' && systemctl --user stop scroll-session.target"
   ];
-  # The neutral `nixdesktop.startup` contract, consumed rather than hand-wired.
-  #
-  # nixdesktop components (noctalia today) append what they need to a compositor-neutral list
-  # instead of writing sway/scroll `exec` lines directly. Translating that list was previously the
-  # CONSUMER's job, via a line this repo's README told them to copy:
-  #
-  #     programs.scroll.startup = config.nixdesktop.startup;
-  #
-  # Forget it and the failure is silent: the component is configured, its files land, and it never
-  # launches -- no error, because a populated list with no reader is a valid configuration. Both
-  # this README and nixniri's warned about it in prose, which is the tell that it should never have
-  # been the consumer's job in the first place.
+  # The neutral `nixdesktop.startup` contract, consumed rather than hand-wired: nixdesktop
+  # components (noctalia today) append what they need to a compositor-neutral list instead of
+  # writing sway/scroll `exec` lines directly.
   #
   # Read through `lib.probeFact` (consumed from
   # [nixhost](https://github.com/julian-corbet/nixhost-corbet-ch)'s `lib/facts.nix` via this
   # repo's own `nixhost` flake input -- see flake.nix, and this file's own outer `{ probeFact }:`
   # argument) rather than a bare `config.nixdesktop.startup or [ ]`: a host running scroll with NO
-  # nixdesktop module composed
-  # sees an empty list and renders nothing extra, never an evaluation error -- same as before.
-  # What the bare form could not do is tell THAT case apart from "nixdesktop IS composed, but
-  # `startup` itself moved or was renamed" -- `startup` has a real `[ ]` default, so a rename
-  # would resolve to an empty list JUST AS SILENTLY as nixdesktop never having been imported at
-  # all, and a populated-but-unreachable list is exactly the failure mode this file's own header
-  # describes above (configured, files land, never launches, no error). `probeFact`'s warning
-  # (`config.warnings` below) is now the only thing that would ever tell anyone -- see
+  # nixdesktop module composed sees an empty list and renders nothing extra, never an evaluation
+  # error. What the bare form could not do is tell THAT case apart from "nixdesktop IS composed,
+  # but `startup` itself was renamed" -- `startup` has a real `[ ]` default, so a rename resolves
+  # to an empty list JUST AS SILENTLY as nixdesktop never having been imported at all, and a
+  # populated-but-unreachable list renders nothing with no error either way. `probeFact`'s warning
+  # (`config.warnings` below) is the only thing that tells the two cases apart -- see
   # `checks/startup-contract.nix`'s own fact-wiring group for the proof.
   #
   # This keeps the dependency one-way -- nixdesktop declares the contract and knows nothing about
@@ -767,12 +755,10 @@ in
         }
       ];
 
-      # THE SHARED READ CONTRACT'S OWN OUTPUT: state (c) on `nixdesktop.startup` -- composed but
-      # renamed -- warns here, the one case the "populated list with no reader" failure mode this
-      # file's own header describes can otherwise never announce itself (a rename produces the
-      # SAME empty `[ ]` as nixdesktop never having been imported, and both render fine, with no
-      # error). See `nixdesktopStartupProbe`'s own comment above and
-      # `checks/startup-contract.nix`'s fact-wiring group for the proof.
+      # nixdesktop.startup composed but renamed -- the one case that would otherwise render an
+      # empty list with no error, indistinguishable from nixdesktop never being imported at all.
+      # See `nixdesktopStartupProbe`'s comment above and `checks/startup-contract.nix`'s
+      # fact-wiring group for the proof.
       warnings = nixdesktopStartupProbe.warnings;
 
       xdg.configFile."scroll/config".text = renderedConfig;
