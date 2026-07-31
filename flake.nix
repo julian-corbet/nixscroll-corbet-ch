@@ -18,11 +18,35 @@
       url = "github:Diax170/scroll-flake";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # nixhost IS an input, for exactly one thing: `lib.probeFact` (github:julian-corbet/
+    # nixhost-corbet-ch, `lib/facts.nix`) -- the shared, plain-function fix for the
+    # cross-namespace defensive-read defect class `home/scroll.nix`'s own
+    # `nixdesktopStartupProbe` leans on (see nixhost's own `lib/facts.nix` header). This repo
+    # used to vendor a byte-identical copy of that file; it is now consumed instead, the same
+    # "one recipe, not a second copy" fix nixvault/nixnas already applied to the f2fs catalogue
+    # they both used to vendor. `probeFact` is closed over as a plain function argument (below),
+    # never `_module.args` -- the same partially-applied-before-the-module-system-sees-it
+    # pattern this family already uses for `nixfsCatalogue` (see infra's own flake.nix comment on
+    # `mkNixnas` for that precedent) -- so a consumer importing `homeManagerModules.scroll` sees
+    # an ordinary module function and never needs to know `nixhost` exists. This is unrelated to
+    # how `nixdesktop.startup` itself is read: that stays a defensive, zero-flake-dependency
+    # probe, exactly as before -- only the `probeFact` MECHANISM itself is now consumed rather
+    # than vendored.
+    nixhost = {
+      url = "github:julian-corbet/nixhost-corbet-ch";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, scroll-flake }:
+  outputs = { self, nixpkgs, scroll-flake, nixhost }:
     let
       forAllSystems = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" ];
+
+      # `probeFact` closed over here, before the module system ever sees the result -- see the
+      # `nixhost` input comment above. The exported value is a plain home-manager module function
+      # taking the usual `{ lib, config, ... }`; nothing about consuming it changes.
+      scrollModule = import ./home/scroll.nix { inherit (nixhost.lib) probeFact; };
     in
     {
       # ── PACKAGING (passthrough, see the input comment above) ────────────────────────────────
@@ -51,8 +75,8 @@
       # Installs nothing — see README. Reads no package by default; the one place it optionally
       # does (see `package` option in home/scroll.nix) never adds anything to home.packages.
       homeManagerModules = {
-        scroll = ./home/scroll.nix;
-        default = ./home/scroll.nix;
+        scroll = scrollModule;
+        default = scrollModule;
       };
 
       # ── CHECKS ────────────────────────────────────────────────────────────────────────────
@@ -74,6 +98,7 @@
       checks = forAllSystems (system: {
         startup-contract = import ./checks/startup-contract.nix {
           pkgs = nixpkgs.legacyPackages.${system};
+          inherit scrollModule;
         };
         # Runs the REAL binary against this module's own output. Everything else here is Nix
         # inspecting Nix, which cannot notice that scroll disagrees -- and it did, about ten
@@ -82,6 +107,7 @@
         config-accepted = import ./checks/config-accepted.nix {
           pkgs = nixpkgs.legacyPackages.${system};
           scroll = self.packages.${system}.scroll;
+          inherit scrollModule;
         };
       });
 

@@ -22,7 +22,7 @@
 # test: a bare `enable = true` renders five lines and would have caught none of the ten bugs. When
 # adding an option to home/scroll.nix, add it here too -- an option absent from this fixture is an
 # option no one has ever asked scroll about.
-{ pkgs, scroll }:
+{ pkgs, scroll, scrollModule }:
 let
   lib = pkgs.lib;
 
@@ -105,8 +105,12 @@ let
     bogus_directive_that_scroll_cannot_know true
   '';
 
+  # `scrollModule` arrives ALREADY partially applied (flake.nix closes `home/scroll.nix` over the
+  # real, locked `nixhost.lib.probeFact` before this check ever runs) -- see
+  # checks/startup-contract.nix's own header for why this file never reaches for the raw
+  # `../home/scroll.nix` path itself either.
   rendered = (lib.evalModules {
-    modules = [ ../home/scroll.nix hmStub { _module.args.pkgs = pkgs; } fixture ];
+    modules = [ scrollModule hmStub { _module.args.pkgs = pkgs; } fixture ];
   }).config.xdg.configFile."scroll/config".text;
 
   configFile = pkgs.writeText "scroll-fixture.config" rendered;

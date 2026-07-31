@@ -11,7 +11,20 @@
 # to, not an attempt to reimplement home-manager: the point is to exercise THIS module's logic, and
 # a full home-manager instantiation would add a large dependency without covering any more of the
 # thing under test.
-{ pkgs, lib ? pkgs.lib }:
+#
+# The fact-wiring group at the bottom proves the SAME blind spot one layer deeper: `home/scroll.nix`
+# reads `nixdesktop.startup` through `lib.probeFact` (consumed from nixhost's own `lib/facts.nix`
+# via this repo's `nixhost` flake input, see flake.nix), which is the only thing that can ever
+# tell "nixdesktop not composed at all" apart from "nixdesktop composed but `startup` itself
+# renamed" -- both resolve to the identical empty list `startup`'s own real default already
+# provides, so without this check a rename would be just as invisible as the original
+# zero-consumers incident this file exists to prevent.
+#
+# `scrollModule` arrives here ALREADY partially applied (flake.nix closes `home/scroll.nix` over
+# the real, locked `nixhost.lib.probeFact` before this check ever runs) -- this file never reaches
+# for the raw `../home/scroll.nix` path itself, the same "consume the applied module, not the raw
+# file" shape nixlxc/nixvm's own checks/default.nix use for `containersModule`/`guestsModule`.
+{ pkgs, lib ? pkgs.lib, scrollModule }:
 let
   stubs = { lib, ... }: {
     options = {
@@ -51,16 +64,24 @@ let
     config.nixdesktop.autostart = [ "noctalia-shell -d" ];
   };
 
-  render = extra: (lib.evalModules {
-    modules = [ stubs ../home/scroll.nix { programs.scroll.enable = true; } ] ++ extra;
+  evalScroll = extra: (lib.evalModules {
+    modules = [ stubs scrollModule { programs.scroll.enable = true; } ] ++ extra;
     specialArgs = { inherit pkgs; };
-  }).config.xdg.configFile."scroll/config".text;
+  }).config;
+
+  render = extra: (evalScroll extra).xdg.configFile."scroll/config".text;
+  warningsOf = extra: (evalScroll extra).warnings;
 
   withContract = render [ contract ];
   withoutContract = render [ ];
 
   # With a host ALSO declaring its own startup command, so ordering can be asserted.
   withBoth = render [ contract { programs.scroll.startup = [ "host-own-command" ]; } ];
+
+  # ── fact-wiring: lib.probeFact proven THROUGH the real home/scroll.nix module ────────────
+  warningsFaithful = warningsOf [ contract ];
+  warningsNoNixdesktopAtAll = warningsOf [ ];
+  warningsRenamed = warningsOf [ contractRenamed ];
 
   has = haystack: needle: lib.hasInfix needle haystack;
 
@@ -102,6 +123,28 @@ let
     # trivially and the whole file would be a very confident no-op.
     "both renders are real, non-empty configs" =
       lib.stringLength withoutContract > 100 && lib.stringLength withContract > 100;
+
+    # ── fact-wiring: lib.probeFact (nixhost's own lib/facts.nix, consumed via this repo's
+    # `nixhost` flake input) proven THROUGH this real module, not just against lib/facts.nix's
+    # own function-level behaviour.
+    # `nixdesktop.startup` has a genuine `[ ]` default, so a rename resolves to the identical
+    # empty list a never-imported nixdesktop would -- both render fine, silently, with no error --
+    # which is exactly the "populated list with no reader" failure mode this file's own header
+    # describes, just one level further back: now the LIST ITSELF can go silently unreachable, not
+    # only unread. The warning is the only thing that would ever tell anyone.
+    "state (a) -- nixdesktop not composed at all -- produces no warnings" =
+      warningsNoNixdesktopAtAll == [ ];
+
+    "nixdesktop composed with its real, un-renamed shape produces no warnings" =
+      warningsFaithful == [ ];
+
+    "nixdesktop composed but startup renamed warns exactly once, naming the option" =
+      lib.length warningsRenamed == 1
+      && has (lib.head warningsRenamed) "nixdesktop.startup"
+      && has (lib.head warningsRenamed) "nixdesktop";
+
+    "a renamed nixdesktop still evaluates and renders nothing extra, never an error" =
+      !(has (render [ contractRenamed ]) "noctalia-shell");
   };
 
   failed = lib.attrNames (lib.filterAttrs (_: passed: !passed) results);

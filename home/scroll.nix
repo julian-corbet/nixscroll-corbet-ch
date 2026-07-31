@@ -23,10 +23,10 @@
 # snapping feature, the five options that rendered it were written from an assumption, and every
 # one was rejected by the real binary the first time anybody asked it. checks/config-accepted.nix
 # now asks it on every build — see that file before adding an option here.
+{ probeFact }:
 { lib, config, ... }:
 let
   cfg = config.programs.scroll;
-  factsLib = import ../lib/facts.nix { inherit lib; };
 
   inherit (lib) mkEnableOption mkOption types mkIf mkMerge mkDefault optional optionals optionalString concatStringsSep concatMapStringsSep filter;
 
@@ -256,9 +256,11 @@ let
   # this README and nixniri's warned about it in prose, which is the tell that it should never have
   # been the consumer's job in the first place.
   #
-  # Read through `lib.probeFact` (`lib/facts.nix`, vendored from
-  # [nixhost](https://github.com/julian-corbet/nixhost-corbet-ch)'s own copy) rather than a bare
-  # `config.nixdesktop.startup or [ ]`: a host running scroll with NO nixdesktop module composed
+  # Read through `lib.probeFact` (consumed from
+  # [nixhost](https://github.com/julian-corbet/nixhost-corbet-ch)'s `lib/facts.nix` via this
+  # repo's own `nixhost` flake input -- see flake.nix, and this file's own outer `{ probeFact }:`
+  # argument) rather than a bare `config.nixdesktop.startup or [ ]`: a host running scroll with NO
+  # nixdesktop module composed
   # sees an empty list and renders nothing extra, never an evaluation error -- same as before.
   # What the bare form could not do is tell THAT case apart from "nixdesktop IS composed, but
   # `startup` itself moved or was renamed" -- `startup` has a real `[ ]` default, so a rename
@@ -275,7 +277,7 @@ let
   #
   # Ordered BEFORE cfg.startup: contract entries are session components (a bar, a notifier, a
   # polkit agent) that a host's own startup commands may reasonably expect to already be running.
-  nixdesktopStartupProbe = factsLib.probeFact {
+  nixdesktopStartupProbe = probeFact {
     inherit config;
     namespace = "nixdesktop";
     path = [ "startup" ];

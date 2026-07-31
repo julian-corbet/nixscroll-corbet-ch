@@ -180,14 +180,17 @@ they need to a neutral `nixdesktop.startup` list rather than writing into any co
 namespace.
 
 **This module splices that list for you.** Nothing to wire: `home/scroll.nix` reads
-`config.nixdesktop.startup` defensively (`or [ ]`) and emits each entry as its own `exec` line,
-ordered ahead of anything you put in `programs.scroll.startup` — contract entries are session
-components a host's own commands may expect to be running already.
+`config.nixdesktop.startup` through `lib.probeFact` (consumed from
+[nixhost](https://github.com/julian-corbet/nixhost-corbet-ch)'s own `lib/facts.nix` via this
+repo's own `nixhost` flake input) and emits each entry
+as its own `exec` line, ordered ahead of anything you put in `programs.scroll.startup` — contract
+entries are session components a host's own commands may expect to be running already.
 
 If no nixdesktop module is in scope at all, the read yields an empty list and nothing extra is
 rendered. No flake input on nixdesktop is involved, and none is needed; this is the same
-defensive-read idiom nixboot uses for `nixstorage.layout` and nixhost uses for the facts it mirrors.
-The dependency stays one-way: nixdesktop declares the contract and knows nothing about scroll.
+defensive-read idiom nixboot uses for `nixstorage.layout` and nixhost uses for the facts it
+mirrors. The dependency stays one-way: nixdesktop declares the contract and knows nothing about
+scroll.
 
 > **This used to be your job, and it was a trap.** Earlier versions asked you to write
 > `programs.scroll.startup = config.nixdesktop.startup;` yourself, on the stated grounds that a
@@ -197,6 +200,14 @@ The dependency stays one-way: nixdesktop declares the contract and knows nothing
 > never launches, with no error possible, because a populated list with no reader is a valid
 > configuration. `checks/startup-contract.nix` now asserts the splice in both directions, since
 > `nix flake check` does not evaluate `homeManagerModules` and so never covered this at all.
+>
+> **A second, quieter version of the same trap survives even after the splice is automatic:**
+> `nixdesktop.startup` has a genuine `[ ]` default, so if nixdesktop ever renamed it, the read
+> would resolve to the SAME empty list a never-imported nixdesktop produces — silently, with no
+> error, exactly like the original incident, just one layer further back (the list itself
+> unreachable, not merely unread). A bare `config.nixdesktop.startup or [ ]` cannot tell the two
+> apart; `lib.probeFact` can, and warns only for the rename. `checks/startup-contract.nix`'s own
+> fact-wiring group proves it fires.
 
 `programs.scroll.startup` remains yours for the host's own commands, and still takes bare commands
 rather than raw config lines. (niri's native startup syntax takes raw KDL, so nixniri translates the
