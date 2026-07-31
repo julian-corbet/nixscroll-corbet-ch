@@ -188,16 +188,34 @@ let
   xwaylandLine = optionalIf (cfg.xwayland != null) "xwayland ${cfg.xwayland}";
 
   # ── outputs ───────────────────────────────────────────────────────────────────────────
+  # THE NAME IS QUOTED, and that is not cosmetic. sway/scroll identify an output either by
+  # connector name (`DP-1`) or by a space-separated `"<make> <model> <serial>"` EDID triple, and the
+  # triple is the only identifier that survives a monitor moving between hosts or between ports.
+  # Unquoted, `output ${name} resolution ...` with a real identity emits
+  #
+  #     output Hewlett Packard HP LA2306 CNC207QJDN resolution 1920x1080@60Hz
+  #
+  # which scroll parses as output name `Hewlett` followed by garbage -- a SILENTLY wrong config, not
+  # a parse error. `renderInput` below already quotes for exactly this reason; outputs did not, and
+  # the defect was invisible because every consumer so far happened to key by connector name, which
+  # never contains a space.
+  # NOT lib.escapeShellArg: this is scroll's own config language, not a shell. escapeShellArg emits
+  # POSIX single-quoting, which is a different grammar that happens to look similar; sway/scroll
+  # document double quotes (`output "Some Company ABC123 0x00000000" pos 1920 0`). Escape an
+  # embedded double quote rather than assuming identities never contain one.
+  quoteName = n: ''"${lib.replaceStrings [ ''"'' ] [ ''\"'' ] n}"'';
+
   renderOutput = name: o:
     let
+      out = "output ${quoteName name}";
       lines = filter (x: x != null) [
-        (optionalIf (o.resolution != null) "output ${name} resolution ${o.resolution}")
-        (optionalIf (o.position != null) "output ${name} position ${o.position}")
-        (optionalIf (o.background != null) "output ${name} background ${o.background}")
-        (optionalIf (o.scale != null) "output ${name} scale ${toString o.scale}")
-        (optionalIf (o.layout.type != null) "output ${name} layout_type ${o.layout.type}")
-        (optionalIf (o.layout.defaultWidth != null) "output ${name} layout_default_width ${toString o.layout.defaultWidth}")
-        (optionalIf (o.layout.defaultHeight != null) "output ${name} layout_default_height ${toString o.layout.defaultHeight}")
+        (optionalIf (o.resolution != null) "${out} resolution ${o.resolution}")
+        (optionalIf (o.position != null) "${out} position ${o.position}")
+        (optionalIf (o.background != null) "${out} background ${o.background}")
+        (optionalIf (o.scale != null) "${out} scale ${toString o.scale}")
+        (optionalIf (o.layout.type != null) "${out} layout_type ${o.layout.type}")
+        (optionalIf (o.layout.defaultWidth != null) "${out} layout_default_width ${toString o.layout.defaultWidth}")
+        (optionalIf (o.layout.defaultHeight != null) "${out} layout_default_height ${toString o.layout.defaultHeight}")
       ];
     in
     lines;
