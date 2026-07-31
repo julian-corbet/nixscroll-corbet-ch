@@ -149,8 +149,18 @@ let
 
   failed = lib.attrNames (lib.filterAttrs (_: passed: !passed) results);
 in
+# `pkgs.emptyFile`, not `pkgs.runCommand "..." {} "touch $out"`: this check decides everything at
+# EVALUATION time, so the derivation below is a pure formality that `nix flake check` requires
+# anyway -- but `nix flake check --all-systems` (which this repo's own CI runs, and rightly: without
+# it every non-runner system goes unevaluated while CI reports green) asks for that formality on
+# EVERY declared system. `runCommand`'s output path is system-dependent, so the aarch64-linux
+# marker becomes a REAL aarch64 build and dies with "platform mismatch" on an x86_64 runner --
+# turning a passing test suite into a red check about nothing. `emptyFile` is fixed-output: its
+# path comes from the content hash alone and is byte-identical on every system, so Nix substitutes
+# it (or finds it already realised) instead of building it, anywhere. Same fix, same reason, as
+# nixdesktop's `checks/support.nix`.
 if failed == [ ]
-then pkgs.runCommand "nixscroll-startup-contract-ok" { } "touch $out"
+then pkgs.emptyFile
 else throw ''
   nixscroll: the nixdesktop.startup seam is broken. Failing assertions:
   ${lib.concatMapStringsSep "\n" (f: "  - ${f}") failed}

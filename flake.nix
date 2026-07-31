@@ -95,6 +95,15 @@
           pkgs = nixpkgs.legacyPackages.${system};
           inherit scrollModule;
         };
+        # Evaluates the nixdesktop.layouts/nixdesktop.monitors/nixdesktop.sessions translation --
+        # transform inversion, identity-with-spaces quoting, alias fan-out, disabled outputs,
+        # mode/modeline rendering, and the permittedDrmDevices passthrough. Nix inspecting Nix, same
+        # caveat as startup-contract: it proves this module renders what it INTENDS, not that
+        # scroll agrees -- config-accepted below is the one that asks the real binary.
+        layout-outputs = import ./checks/layout-outputs.nix {
+          pkgs = nixpkgs.legacyPackages.${system};
+          inherit scrollModule;
+        };
         # Runs the REAL binary against this module's own output. Everything else here is Nix
         # inspecting Nix, which cannot notice that scroll disagrees -- and it did, about ten
         # directives. See the check's header for why it greps stderr instead of trusting the

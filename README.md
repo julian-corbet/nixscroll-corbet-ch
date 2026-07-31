@@ -213,3 +213,70 @@ scroll.
 rather than raw config lines. (niri's native startup syntax takes raw KDL, so nixniri translates the
 same neutral list into `spawn-sh-at-startup` lines instead — each compositor module adapts the
 contract to its own syntax, which is the point of the contract being neutral.)
+
+## Wiring nixdesktop's monitors, layouts and device permission
+
+[nixdesktop](https://github.com/julian-corbet/nixdesktop-corbet-ch) also owns a fleet-wide monitor
+registry (`nixdesktop.monitors`, keyed by EDID identity — a panel roams between hosts), named
+output arrangements (`nixdesktop.layouts`), and per-session device permission
+(`nixdesktop.sessions.<name>.permittedDevices`, the complement of which is derived for niri —
+scroll needs only the allow-side). `programs.scroll.nixdesktop` consumes all three, the same
+`lib.probeFact` way `startup` above does: never a flake input on nixdesktop, silent when it isn't
+composed at all — but naming a `layout` or `session` that does not resolve to a real entry FAILS
+THE BUILD (an assertion, not a warning): a request to arrange real monitors or claim a real device
+that silently does nothing is worse than one that refuses to build.
+
+```nix
+programs.scroll.nixdesktop = {
+  layout = "docked";   # a nixdesktop.layouts.<name> — renders as `output` blocks
+  session = "devhome"; # a nixdesktop.sessions.<name> — feeds permittedDrmDevices below
+};
+```
+
+**`layout`** translates every enabled output in the named `nixdesktop.layouts.<name>` into this
+module's own `output` directives — mode/modeline, scale, position, transform, enable/disable —
+and, for an output matched by identity, one stanza per `aliases` variant (the same physical panel
+presents a different EDID per input, and scroll matches only the literal string on the wire). This
+is *additive* to the hand-written `outputs` attrset above, not a replacement for it: a host can
+hand-tune one output and let the layout drive the rest.
+
+Two measured facts this translation exists to get right, both silent failures if missed:
+
+- **Rotation direction.** nixdesktop's `transform` vocabulary is counter-clockwise, matching
+  `wl_output` itself. scroll (a sway fork) calls `invert_rotation_direction()` on every parse, so
+  a bare pass-through would rotate a monitor 180° from what was asked for — and `swaymsg`/`scrollmsg`
+  report the config's own spelling back, so the bug is invisible from IPC. This module inverts
+  90↔270 and flipped-90↔flipped-270 (the other four values are their own inverse) in one named
+  helper, so the swap can't be duplicated wrongly a second time.
+- **A plain `mode` needs a literal `Hz` suffix — and it is plain `mode`, never `mode --custom`.**
+  Verified against the real binary: `mode 1920x1080@60` is rejected, `mode 1920x1080@60Hz` is
+  accepted, and `mode 1920x1080` (no rate at all) is accepted unchanged. nixdesktop's neutral `mode`
+  string carries no Hz requirement, so this module normalises it. `--custom` was tried first and is
+  wrong: it names an unlisted/custom *modeline*, not "a mode typed by hand", and scroll accepts a
+  plain "WIDTHxHEIGHT[@RATE]" mode without it. A raw `modeline` (the option nixdesktop's own layout
+  module carries specifically for panels — an ASPEED ast2500 BMC framebuffer in this estate's case —
+  that only accept one sync polarity, which no named mode can express) is scroll's actual
+  custom-mode path, and is passed through to scroll's own `modeline` directive verbatim.
+
+**`session`** feeds `programs.scroll.nixdesktop.permittedDrmDevices`, a read-only, always-derived
+list of real `/dev/dri/by-path/*-card` *paths* — never bare device names. Each name in
+`nixdesktop.sessions.<name>.permittedDevices` is resolved, at eval time, against
+`nixgpu.stableDevicePaths.devices.<name>.cardPath`: a PCI domain:bus:device.function or platform
+device name is a physical slot fixed at build/install time, not a probe-order artifact like
+`/dev/dri/cardN` or a DRM minor (which DO renumber between boots — an evdi load reshuffled this
+estate's own host on 2026-07-29), so unlike those, the path is genuinely knowable and stable at
+eval time. This is a reversal from an earlier version of this option that emitted device *names*
+and deferred resolution to whatever started the session: that shape measurably breaks twice over —
+a `DevicePolicy=strict` systemd unit deadlocks the instant an `ExecStartPre` tries to populate
+`DeviceAllow=` from inside its own already-restricted cgroup, and niri's sibling compositor module
+cannot resolve a name at all, because niri reads its config from disk, never a launcher's
+environment — a name-based restriction there is a valid config that enforces nothing. Ordered
+primary-first, exactly as `nixdesktop.sessions.<name>.permittedDevices` orders it, because wlroots
+takes the *first* device in `WLR_DRM_DEVICES` that successfully opens as the primary. A name absent
+from `nixgpu.stableDevicePaths.devices` is dropped from the list rather than thrown.
+
+`checks/layout-outputs.nix` proves the translation directly (transform inversion for every value,
+identity-with-spaces quoting, alias fan-out, a disabled output rendering only `disable`, an
+unresolvable `layout`/`session` name failing the build, and `permittedDrmDevices` resolving to
+`nixgpu`'s stable paths); the identity, modeline and transform cases are also run through
+`checks/config-accepted.nix`'s real-binary gate.

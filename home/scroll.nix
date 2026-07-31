@@ -219,7 +219,169 @@ let
       ];
     in
     lines;
-  outputLines = lib.concatLists (map (name: renderOutput name cfg.outputs.${name}) (lib.attrNames cfg.outputs));
+
+  # ── nixdesktop layout translation ────────────────────────────────────────────────────
+  # Consumes `nixdesktop.layouts.<name>` and, to resolve identity matching, `nixdesktop.monitors`
+  # -- through `lib.probeFact`, exactly like `nixdesktopStartupProbe` below: never a flake input on
+  # nixdesktop (see flake.nix's own nixhost-input comment), so this repo keeps working for a
+  # consumer who has never heard of nixdesktop. Both tables are plain option+assertion modules with
+  # no `pkgs` argument (nixdesktop's own modules/monitors.nix and modules/layouts.nix headers say
+  # so explicitly), so whoever composes a host imports them into WHICHEVER config tree this module
+  # lives in -- in practice the same home-manager profile that imports `programs.scroll` itself.
+  #
+  # This is additive to, not a replacement for, the hand-written `outputs` escape hatch above: both
+  # contribute lines to the same generated section (`outputLines` below), so a host can hand-write
+  # one output and let a layout drive the rest.
+  desktopLayoutsProbe = probeFact {
+    inherit config;
+    namespace = "nixdesktop";
+    path = [ "layouts" ];
+    fallback = { };
+  };
+
+  desktopMonitorsProbe = probeFact {
+    inherit config;
+    namespace = "nixdesktop";
+    path = [ "monitors" ];
+    fallback = { };
+  };
+
+  # `nixdesktop.sessions.<name>.permittedDevices` -- device NAMES, the same keys
+  # `nixgpuDevicesProbe` below resolves against to build the real path list `permittedDrmDevices`
+  # exports (see that option for why a path is now the right currency, not a name).
+  desktopSessionsProbe = probeFact {
+    inherit config;
+    namespace = "nixdesktop";
+    path = [ "sessions" ];
+    fallback = { };
+  };
+
+  # `nixgpu.stableDevicePaths.devices.<name>` -- the SAME names `permittedDevices` above carries
+  # (nixdesktop's own modules/session.nix documents `nixhost.resources.gpu` as a plain MIRROR of
+  # this exact table, same keys throughout), read here directly rather than through nixhost's
+  # mirror because this module needs `cardPath`, a fact nixhost's own mirror does not repeat --
+  # see `permittedDrmDevices` below. probeFact, never a flake input on nixgpu, same reasoning as
+  # every other cross-repo read in this file.
+  nixgpuDevicesProbe = probeFact {
+    inherit config;
+    namespace = "nixgpu";
+    path = [ "stableDevicePaths" "devices" ];
+    fallback = { };
+  };
+
+  resolvedDesktopLayout =
+    if cfg.nixdesktop.layout == null then null
+    else desktopLayoutsProbe.value.${cfg.nixdesktop.layout} or null;
+
+  resolvedDesktopSession =
+    if cfg.nixdesktop.session == null then null
+    else desktopSessionsProbe.value.${cfg.nixdesktop.session} or null;
+
+  # A permitted device NAME that resolves in the probed inventory becomes its `cardPath` --
+  # `/dev/dri/by-path/pci-<addr>-card` or `/dev/dri/by-path/platform-<addr>-card`, both stable at
+  # eval time (see `permittedDrmDevices` below). A name the inventory does not contain (the
+  # inventory never arrived, or the two tables were composed apart -- the same dangling-slug case
+  # `matcherNamesOf` already tolerates above) resolves to `null` and is dropped rather than thrown.
+  #
+  # NOT `nixgpuDevicesProbe.value.${deviceName}.cardPath or null` -- that is exactly TRAP 1 from
+  # nixhost's own `lib/facts.nix` header, reintroduced one call site up: `cardPath` is a REAL,
+  # DECLARED attribute on every device submodule (nixgpu's own option, not something absent), so
+  # `or` never fires for it -- the device is free to declare no `address` at all (nixgpu's own
+  # docs call this legitimate: "an inventory that only needs the pre-existing by-vendor/by-driver
+  # symlinks never has to state this"), in which case forcing `cardPath` THROWS, uncaught, and
+  # `or`'s fallback is never reached because there was nothing structurally missing for it to
+  # catch. `builtins.tryEval` is what actually catches that throw -- same fix nixhost's own
+  # `attemptLeaf` uses, for the identical reason.
+  drmCardPathOf = deviceName:
+    let device = nixgpuDevicesProbe.value.${deviceName} or null; in
+    if device == null then null
+    else
+      let attempt = builtins.tryEval device.cardPath; in
+      if attempt.success then attempt.value else null;
+
+  # scroll/sway's rotation is CLOCKWISE -- sway calls invert_rotation_direction() on every parse --
+  # while nixdesktop's neutral vocabulary is COUNTER-CLOCKWISE, matching wl_output itself (see
+  # nixdesktop's modules/layouts.nix `transform` option for the full measured detail). ONE named
+  # helper, so the swap is stated exactly once and cannot be duplicated wrongly a second time
+  # anywhere else in this repo. 90 and 270 (flipped or not) swap; normal/180/flipped/flipped-180
+  # are each their own inverse and pass straight through untouched.
+  invertTransform = t: {
+    normal = "normal";
+    "180" = "180";
+    flipped = "flipped";
+    "flipped-180" = "flipped-180";
+    "90" = "270";
+    "270" = "90";
+    "flipped-90" = "flipped-270";
+    "flipped-270" = "flipped-90";
+  }.${t};
+
+  # scroll's plain `mode` REQUIRES the refresh rate to end in a literal `Hz` -- established
+  # against the real binary (same doctrine as `checks/config-accepted.nix`): `mode 1920x1080@60`
+  # is rejected ("Invalid mode refresh rate"), `mode 1920x1080@60Hz` is accepted, case of the
+  # suffix does not matter. A bare width x height with no `@rate` at all is also accepted,
+  # unchanged. nixdesktop's neutral `mode` string carries no Hz requirement -- its own regex is
+  # `@.*`, deliberately unconstrained, see modules/layouts.nix -- so the suffix is normalised here
+  # rather than assumed present.
+  #
+  # NOT `mode --custom`. `--custom` names an unlisted/custom MODELINE, not "a mode written by
+  # hand" -- confirmed against the real binary: `mode 1920x1080@60Hz` and `mode 1920x1080` are
+  # both ACCEPTED as plain, ordinary modes; `--custom` was never needed for either and is the
+  # wrong directive for a "WIDTHxHEIGHT[@RATE]" spec regardless. A raw sync-polarity modeline (the
+  # `modeline` option above) is scroll's actual custom-mode path and already renders as scroll's
+  # own `modeline` directive, never through this one.
+  normaliseModeRate = m:
+    let parts = builtins.match "([0-9]+x[0-9]+)(@([0-9.]+)([Hh][Zz])?)?" m;
+    in
+    if parts == null then m
+    else
+      let
+        wh = builtins.elemAt parts 0;
+        rate = builtins.elemAt parts 2;
+      in
+      if rate == null then wh else "${wh}@${rate}Hz";
+
+  # Every matcher NAME one layout output entry must be rendered under. `match = "connector"` is
+  # exactly one name. `match = "identity"` is the monitor's own `identifier` PLUS every alias's --
+  # the same physical panel presents a DIFFERENT EDID per input (a KVM, a dock's other port), a
+  # compositor matches only the exact string on the wire, and both must therefore get their own
+  # stanza with identical settings (see nixdesktop's modules/monitors.nix header on `aliases`).
+  #
+  # A monitor slug absent from the probed table renders NO stanza at all, silently: nixdesktop's
+  # own modules/layouts.nix already hard-asserts that every referenced slug exists in the SAME
+  # composed tree, so reaching this module with a dangling slug can only mean the two tables were
+  # composed apart from each other -- not this module's assertion to make (see the warning in
+  # `config` below, which is the one that actually fires in that case).
+  matcherNamesOf = o:
+    if o.match == "connector" then [ o.connector ]
+    else
+      let mon = desktopMonitorsProbe.value.${o.monitor} or null;
+      in if mon == null then [ ] else [ mon.identifier ] ++ map (a: a.identifier) mon.aliases;
+
+  # Disabled short-circuits to JUST `disable` -- no mode/scale/position/transform line alongside
+  # it. This mirrors nixniri's own `renderOutputBlock` (`if !o.enable then [ "off" ] else [...]`)
+  # exactly: two translators of one neutral vocabulary (`nixdesktop.layouts`) rendering the same
+  # `enable = false` entry should not gratuitously disagree about what else gets emitted for it.
+  renderLayoutOutput = name: o:
+    let out = "output ${quoteName name}";
+    in
+    if !o.enable then [ "${out} disable" ]
+    else filter (x: x != null) [
+      (optionalIf (o.modeline != null) "${out} modeline ${o.modeline}")
+      (optionalIf (o.modeline == null && o.mode != null) "${out} mode ${normaliseModeRate o.mode}")
+      (optionalIf (o.scale != null) "${out} scale ${toString o.scale}")
+      (optionalIf (o.position != null) "${out} position ${toString o.position.x} ${toString o.position.y}")
+      "${out} transform ${invertTransform o.transform}"
+    ];
+
+  layoutOutputLines =
+    if resolvedDesktopLayout == null then [ ]
+    else lib.concatLists (map
+      (o: lib.concatLists (map (n: renderLayoutOutput n o) (matcherNamesOf o)))
+      resolvedDesktopLayout.outputs);
+
+  outputLines = lib.concatLists (map (name: renderOutput name cfg.outputs.${name}) (lib.attrNames cfg.outputs))
+    ++ layoutOutputLines;
 
   # ── input ─────────────────────────────────────────────────────────────────────────────
   renderInput = name: settings:
@@ -640,6 +802,80 @@ in
       '';
     };
 
+    nixdesktop = {
+      layout = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        example = "docked";
+        description = ''
+          Names a `nixdesktop.layouts.<name>` to translate into this config's `output` blocks --
+          read through `lib.probeFact`, the same defensive idiom `startup` below uses, and NEVER
+          a flake input on nixdesktop (see flake.nix). `null`, the default, renders nothing extra:
+          a host that never composes nixdesktop's monitor/layout tables, or that composes them
+          without ever setting this, gets exactly the hand-written `outputs` above and no more --
+          this repo stays independently publishable.
+
+          The hand-written `outputs` attrset above is NOT replaced by naming a layout: both
+          contribute `output` lines to the same generated section, so a host can hand-tune or add
+          one output while letting the layout drive the rest.
+
+          A name that `nixdesktop.layouts` does not declare -- on this host at all, or because the
+          table it resolves to (empty or not) simply has no such entry -- FAILS THE BUILD (see the
+          assertion in `config` below), rather than rendering nothing with no error: naming a
+          layout is a request to arrange real monitors, and a request that silently does nothing is
+          worse than one that refuses to build.
+        '';
+      };
+
+      session = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        example = "devhome";
+        description = ''
+          Names a `nixdesktop.sessions.<name>` whose `permittedDevices` becomes
+          `permittedDrmDevices` below -- read through `lib.probeFact`, same as `layout` above.
+          `null`, the default, leaves `permittedDrmDevices` empty. A name that does not resolve
+          FAILS THE BUILD the same way an unresolvable `layout` does -- see that option and the
+          assertion in `config` below.
+        '';
+      };
+
+      permittedDrmDevices = mkOption {
+        type = types.listOf types.str;
+        readOnly = true;
+        description = ''
+          READ-ONLY, derived from `nixdesktop.sessions.<session>.permittedDevices` -- but no
+          longer the NAMES that list carries. Each name is resolved here, at eval time, to its
+          `nixgpu.stableDevicePaths.devices.<name>.cardPath` -- a real `/dev/dri/by-path/*-card`
+          path -- so this option is a real path list, ordered PRIMARY FIRST exactly as
+          `nixdesktop.sessions.<name>.permittedDevices` orders it (wlroots takes the FIRST device
+          in `WLR_DRM_DEVICES` that successfully opens as the primary, the one whose render node
+          backs the renderer and whose GBM allocates for every output). Whatever starts this
+          session sets `WLR_DRM_DEVICES` to this list, colon-joined, and nothing else -- no
+          resolution step of its own left to perform.
+
+          THIS RETRACTS an earlier version of this option that emitted device NAMES on the theory
+          that `/dev/dri/cardN` and the DRM minor renumber (true) and therefore no eval-time path
+          could be trusted (the overcorrection): `cardPath` is not a card number, it is derived
+          from `address` -- a PCI domain:bus:device.function or a platform device name -- which is
+          a physical slot fixed at build/install time, not a probe-order artifact, and
+          `/dev/dri/by-path/*` is systemd-udev's own built-in symlink for exactly that slot (see
+          nixgpu's `stableDevicePaths.devices.<name>.address` for the measured detail). Emitting a
+          name and deferring resolution to the launcher was tried and measured broken in two
+          places: a `DevicePolicy=strict` systemd unit deadlocks the moment an `ExecStartPre` tries
+          to populate `DeviceAllow=` from inside the already-restricted cgroup (`+` does not bypass
+          `DevicePolicy`), and niri's compositor-neutral sibling module cannot resolve a name at
+          all -- niri reads its OWN config file from disk, never a launcher's environment, so a
+          name-based restriction there is a valid config that enforces nothing.
+
+          A permitted NAME absent from `nixgpu.stableDevicePaths.devices` (the inventory never
+          arrived, or was composed apart from `nixdesktop.sessions`) is silently DROPPED from this
+          list rather than thrown -- see `drmCardPathOf`'s own comment for why a session's device
+          claim is not the place to surface a gap that belongs to `nixgpu.stableDevicePaths`.
+        '';
+      };
+    };
+
     input = mkOption {
       type = types.attrsOf (types.attrsOf types.str);
       default = { };
@@ -747,6 +983,42 @@ in
       programs.scroll.decoration.borderRadius = mkDefault 0;
     })
 
+    # `nixdesktop.permittedDrmDevices` is a readOnly, always-derived fact -- defined
+    # UNCONDITIONALLY, the same way nixdesktop's own `permittedDevices`/`deniedDevices` are defined
+    # in its modules/session.nix regardless of any enable flag -- so reading it never depends on
+    # whether `programs.scroll.enable` happens to be true, and `readOnly`'s "exactly one
+    # definition" contract is satisfied even when the rest of this module is switched off.
+    {
+      programs.scroll.nixdesktop.permittedDrmDevices =
+        if resolvedDesktopSession == null then [ ]
+        else filter (p: p != null) (map drmCardPathOf resolvedDesktopSession.permittedDevices);
+
+      # `nixdesktop.session` naming something that does not resolve used to leave
+      # `permittedDrmDevices` silently empty, no warning, no assertion -- forceable with
+      # nixdesktop absent entirely and `session = "devhome"`: eval succeeds, warnings stay empty,
+      # and a seated session ends up with NO permitted device, which is not a cosmetic gap, it is
+      # the session opening no DRM device at all. Asserted here, alongside the value it protects
+      # and for the identical "unconditional" reason: the failure is real whether or not
+      # `programs.scroll.enable` happens to be true. Fires regardless of whether
+      # `desktopSessionsProbe.value` is empty or populated -- both are "does not resolve" from the
+      # caller's point of view, and gating on non-emptiness (the previous, warning-only version of
+      # this check) is exactly what let the empty-table/nixdesktop-absent case through silently.
+      assertions = lib.optional
+        (cfg.nixdesktop.session != null && !(desktopSessionsProbe.value ? ${cfg.nixdesktop.session}))
+        {
+          assertion = false;
+          message = ''
+            programs.scroll.nixdesktop.session names "${toString cfg.nixdesktop.session}", which does
+            not resolve to any nixdesktop.sessions entry on this host${
+              if desktopSessionsProbe.value == { }
+              then " (nixdesktop.sessions is empty here -- nixdesktop was either never composed, or composed with no sessions declared; either way there is nothing this name can resolve to)"
+              else ". Declared: ${concatStringsSep ", " (lib.attrNames desktopSessionsProbe.value)}"
+            }. permittedDrmDevices would otherwise be silently empty, with no error -- for a seated
+            session that means opening no DRM device at all.
+          '';
+        };
+    }
+
     (mkIf cfg.enable {
       assertions = [
         {
@@ -771,13 +1043,59 @@ in
             sway's manual.
           '';
         }
-      ];
+      ]
+      # THE SILENT NO-OP: `nixdesktop.layout` naming something that does not resolve used to
+      # render NOTHING -- no warning, no assertion -- whenever `desktopLayoutsProbe.value` was
+      # empty, which is exactly the state a host with nixdesktop absent entirely is in. Forceable:
+      # nixdesktop not composed at all + `layout = "docked"` used to eval clean, `warnings == [ ]`,
+      # every assertion true, zero layout output lines. Naming a layout is a request to arrange
+      # real monitors; a request that silently does nothing is worse than one that refuses to
+      # build, so this fires regardless of whether the probed table is empty or populated --
+      # unlike the superficially similar rename-warning below (which is about the TABLE having
+      # moved, not about THIS NAME being absent from it). Gated on `cfg.nixdesktop.layout != null`
+      # the same way the `session` assertion above is: `null` (the default) must add NOTHING to
+      # this list, not merely an always-true entry, or "naming no layout raises no assertion of
+      # our own" could never observe an empty list.
+      ++ lib.optional
+        (cfg.nixdesktop.layout != null && !(desktopLayoutsProbe.value ? ${cfg.nixdesktop.layout}))
+        {
+          assertion = false;
+          message = ''
+            programs.scroll.nixdesktop.layout names "${toString cfg.nixdesktop.layout}", which does
+            not resolve to any nixdesktop.layouts entry on this host${
+              if desktopLayoutsProbe.value == { }
+              then " (nixdesktop.layouts is empty here -- nixdesktop was either never composed, or composed with no layouts declared; either way there is nothing this name can resolve to)"
+              else ". Declared: ${concatStringsSep ", " (lib.attrNames desktopLayoutsProbe.value)}"
+            }. No layout output lines would otherwise be rendered, silently, with no error -- the
+            hand-written `outputs` attrset would still render, giving no sign anything was missing.
+          '';
+        };
 
       # nixdesktop.startup composed but renamed -- the one case that would otherwise render an
       # empty list with no error, indistinguishable from nixdesktop never being imported at all.
       # See `nixdesktopStartupProbe`'s comment above and `checks/startup-contract.nix`'s
       # fact-wiring group for the proof.
-      warnings = nixdesktopStartupProbe.warnings;
+      #
+      # The two newer probes' OWN rename-warnings (the TABLE moved or was renamed, as opposed to
+      # the assertions above -- THIS NAME is absent from an otherwise-reachable table) are gated
+      # behind the option that actually asks for them, and this is not a style choice -- it works
+      # around a MEASURED false positive in `lib.probeFact` itself when several independent leaves
+      # share one namespace attribute. `probeFact`'s "composed" test is `config ? nixdesktop` alone
+      # (the namespace's first segment only, see nixhost's lib/facts.nix), so a host composing
+      # ONLY `nixdesktop.startup` -- the one real-world case this repo has today -- already makes
+      # `config ? nixdesktop` true and every OTHER leaf (`monitors`, `sessions`, and `layouts` when
+      # `layout` is unset) reports "unresolved" (a spurious rename warning) purely because
+      # something else under the shared name exists, not because anything moved. Verified directly
+      # against nixhost's own `lib/facts.nix`: composing a fixture with `nixdesktop.startup` alone
+      # and nothing else yields `state = "unresolved"` for both a `monitors` and a `sessions`
+      # probe. Gating each probe's warnings behind the option that consumes it (`layout`/`session`,
+      # both `null` by default) means a host that never touches this repo's nixdesktop-consuming
+      # options sees no noise from it, regardless of which other nixdesktop leaves happen to be
+      # composed alongside `programs.scroll` -- exactly the "defaults to rendering nothing"
+      # contract `layout`/`session` themselves promise.
+      warnings = nixdesktopStartupProbe.warnings
+        ++ optionals (cfg.nixdesktop.layout != null) (desktopLayoutsProbe.warnings ++ desktopMonitorsProbe.warnings)
+        ++ optionals (cfg.nixdesktop.session != null) desktopSessionsProbe.warnings;
 
       xdg.configFile."scroll/config".text = renderedConfig;
 

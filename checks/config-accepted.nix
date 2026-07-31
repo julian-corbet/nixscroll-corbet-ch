@@ -97,6 +97,95 @@ let
       };
       startup = [ "mako" "waybar" ];
       xwayland = "enable";
+
+      # Exercises the nixdesktop-layout translation (home/scroll.nix's `renderLayoutOutput`)
+      # through the SAME real-binary gate as every hand-written option above -- see
+      # `nixdesktopFixture` below for the table this names.
+      nixdesktop.layout = "desk";
+    };
+  };
+
+  # A `nixdesktop.layouts`/`nixdesktop.monitors` stand-in -- minimal on purpose (see
+  # `checks/layout-outputs.nix`'s own header for why this repo does not import nixdesktop's real
+  # modules here either). Exercises every directive `renderLayoutOutput` can emit in one pass: a
+  # raw modeline (the ast2500 sync-polarity case the option exists for), an identity matcher with
+  # embedded spaces (quoting), an inverted transform (90 -> 270 on the wire), scale, position, a
+  # plain `mode` translation from a bare "WIDTHxHEIGHT@RATE" with no Hz suffix (normalised to add
+  # one -- NOT `mode --custom`, which names an unlisted/custom MODELINE and was never the right
+  # directive here, see home/scroll.nix's own `normaliseModeRate` comment), a bare mode with no
+  # refresh rate at all passed through unchanged, and a disabled connector-matched output emitting
+  # only `disable`.
+  nixdesktopFixture = { lib, ... }: {
+    options.nixdesktop = {
+      layouts = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; };
+      monitors = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; };
+    };
+    config.nixdesktop = {
+      monitors.la2306 = {
+        make = "HP Inc.";
+        model = "HP LA2306";
+        serial = "3CQ1234567";
+        identifier = "HP Inc. HP LA2306 3CQ1234567";
+        aliases = [ ];
+      };
+      layouts.desk = {
+        description = "fixture";
+        outputs = [
+          {
+            monitor = "la2306";
+            connector = null;
+            match = "identity";
+            enable = true;
+            mode = null;
+            modeline = "148.50 1920 2008 2052 2200 1080 1084 1089 1125 +hsync +vsync";
+            scale = 1.0;
+            position = { x = 0; y = 0; };
+            transform = "90";
+          }
+          {
+            # Enabled, on purpose: a disabled output renders ONLY `disable` (see home/scroll.nix's
+            # own `renderLayoutOutput`), so a `mode` value here would never reach scroll's parser
+            # at all if this entry were disabled -- exercising the Hz-suffix normalisation through
+            # the real binary needs an output that actually renders it.
+            monitor = null;
+            connector = "HDMI-A-2";
+            match = "connector";
+            enable = true;
+            mode = "1920x1080@60";
+            modeline = null;
+            scale = null;
+            position = null;
+            transform = "normal";
+          }
+          {
+            # A bare mode with NO refresh rate at all -- `normaliseModeRate` must pass this
+            # through completely unchanged, appending no `Hz` where there was no rate to begin
+            # with.
+            monitor = null;
+            connector = "DP-2";
+            match = "connector";
+            enable = true;
+            mode = "1920x1080";
+            modeline = null;
+            scale = null;
+            position = null;
+            transform = "normal";
+          }
+          {
+            # Disabled: proves `output "DP-3" disable` alone is a config the real binary accepts,
+            # with none of this entry's other (deliberately non-null) fields reaching it.
+            monitor = null;
+            connector = "DP-3";
+            match = "connector";
+            enable = false;
+            mode = "1920x1080@60";
+            modeline = null;
+            scale = 2.0;
+            position = { x = 0; y = 1440; };
+            transform = "180";
+          }
+        ];
+      };
     };
   };
 
@@ -110,7 +199,7 @@ let
   # checks/startup-contract.nix's own header for why this file never reaches for the raw
   # `../home/scroll.nix` path itself either.
   rendered = (lib.evalModules {
-    modules = [ scrollModule hmStub { _module.args.pkgs = pkgs; } fixture ];
+    modules = [ scrollModule hmStub nixdesktopFixture { _module.args.pkgs = pkgs; } fixture ];
   }).config.xdg.configFile."scroll/config".text;
 
   configFile = pkgs.writeText "scroll-fixture.config" rendered;
