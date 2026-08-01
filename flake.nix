@@ -104,6 +104,16 @@
           pkgs = nixpkgs.legacyPackages.${system};
           inherit scrollModule;
         };
+        # Evaluates the nixdesktop.sessions.<name>.virtualOutputs -> create_output/output-mode IPC
+        # translation: the HEADLESS-<N+1> numbering offset scroll's own FALLBACK output forces (a
+        # measured fact about the real dawsers/scroll source, not a convention — see the check's
+        # own header and home/scroll.nix's `virtualOutputLines` comment), and that create_output
+        # and its mode line are chained as ONE scrollmsg argument rather than racing across two
+        # separate exec'd processes.
+        virtual-outputs = import ./checks/virtual-outputs.nix {
+          pkgs = nixpkgs.legacyPackages.${system};
+          inherit scrollModule;
+        };
         # Runs the REAL binary against this module's own output. Everything else here is Nix
         # inspecting Nix, which cannot notice that scroll disagrees -- and it did, about ten
         # directives. See the check's header for why it greps stderr instead of trusting the

@@ -102,6 +102,17 @@ let
       # through the SAME real-binary gate as every hand-written option above -- see
       # `nixdesktopFixture` below for the table this names.
       nixdesktop.layout = "desk";
+
+      # Exercises the nixdesktop.sessions.<name>.virtualOutputs -> create_output/output-mode
+      # translation (home/scroll.nix's `virtualOutputLines`) through the SAME real-binary gate --
+      # see `nixdesktopFixture` below for the session this names. `checks/virtual-outputs.nix`
+      # already proves this module renders what it INTENDS (the exact HEADLESS-<N+1> text); this
+      # is the one check that asks scroll's own parser whether the generated `exec` LINE ITSELF
+      # is valid config syntax -- the `exec` directive's payload is opaque to `--validate` (it
+      # never runs the shell command), so what this actually proves is that our quoting of the
+      # whole line does not break the CONFIG file's own tokenizer, which would otherwise silently
+      # swallow or truncate whatever comes after it.
+      nixdesktop.session = "devhome";
     };
   };
 
@@ -119,6 +130,7 @@ let
     options.nixdesktop = {
       layouts = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; };
       monitors = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; };
+      sessions = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; };
     };
     config.nixdesktop = {
       monitors.la2306 = {
@@ -184,6 +196,18 @@ let
             position = { x = 0; y = 1440; };
             transform = "180";
           }
+        ];
+      };
+      # Exercises the virtualOutputs -> create_output/output-mode translation (home/scroll.nix's
+      # `virtualOutputLines`) through the real binary: two entries, so this also proves the
+      # SECOND exec line's HEADLESS-3 addressing (not just the FALLBACK-offset HEADLESS-2 of the
+      # first) parses cleanly, not merely the single-output case.
+      sessions.devhome = {
+        permittedDevices = [ ];
+        deniedDevices = [ ];
+        virtualOutputs = [
+          { width = 1920; height = 1080; }
+          { width = 2560; height = 1440; }
         ];
       };
     };

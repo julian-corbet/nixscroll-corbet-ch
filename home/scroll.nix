@@ -277,6 +277,62 @@ let
     if cfg.nixdesktop.session == null then null
     else desktopSessionsProbe.value.${cfg.nixdesktop.session} or null;
 
+  # ── nixdesktop.sessions.<name>.virtualOutputs -> scroll's `create_output` IPC command ───────
+  #
+  # WHY THIS IS AN EXEC LINE, NEVER A STATIC `output` BLOCK. `create_output` lives in scroll's
+  # (inherited from sway) "Runtime-only commands" table -- `sway/commands.c` keeps that table
+  # explicitly separate from, and alphabetized apart from, the config-file command table above
+  # it -- established by reading the real dawsers/scroll source (this repo's own package input,
+  # see flake.nix), not assumed. A static `output "HEADLESS-N" ...` block in the CONFIG FILE can
+  # only ever configure an output that ALREADY EXISTS by the time the parser reaches it, and
+  # `create_output` is the only thing that ever makes one exist in the first place -- so this has
+  # to run over the same IPC socket `nixdesktopStartupProbe`'s own shutdown-subscribe line below
+  # already proves works from an `exec` at startup.
+  #
+  # WHY EVERY VIRTUAL OUTPUT IS "HEADLESS-${i + 1}", NEVER "HEADLESS-${i}". Every scroll process,
+  # seated or headless alike, unconditionally creates a SECOND, headless backend at startup and
+  # adds ONE output to it before any exec line ever runs -- `sway/server.c`'s `server_init()`
+  # calls `wlr_headless_add_output(server->headless_backend, 800, 600)` and immediately renames
+  # the result to "FALLBACK" via `wlr_output_set_name`. But the rename happens AFTER
+  # `wlr_headless_add_output` has already incremented the one, PROCESS-GLOBAL `last_output_num`
+  # counter that assigns "HEADLESS-<N>" names (`backend/headless/output.c`, `static size_t
+  # last_output_num`) -- so slot 1 of that counter is always spent on an output nobody ever sees,
+  # regardless of delivery class, and the first output THIS module ever creates is always
+  # "HEADLESS-2". Measured directly against the real dawsers/scroll source (both files above),
+  # not inferred from behaviour never observed to be otherwise: get this offset wrong and a
+  # virtual output's resize command silently targets a name nothing answers to, leaving the real
+  # one stuck at `create_output`'s own hardcoded 1920x1080 (see below) with no error anywhere.
+  #
+  # WHY create_output AND ITS mode ARE ONE scrollmsg CALL, NEVER TWO SEPARATE exec LINES. Two
+  # separate `exec` lines fork two INDEPENDENT processes with no ordering guarantee between them
+  # beyond the fork call itself -- two forked `scrollmsg`s' own connect-and-send round trips could
+  # interleave in either order, exactly the kind of race this family exists to design out.
+  # `execute_command` (`sway/commands.c`) splits its input on `;`/`,` and runs the resulting
+  # commands in that fixed order within ONE IPC round trip, so chaining `create_output; output
+  # "HEADLESS-N" mode WxH` as a SINGLE scrollmsg argument makes the ordering structural rather
+  # than merely likely.
+  #
+  # WHY create_output CANNOT TAKE A SIZE ITSELF, AND WHY THE FOLLOW-UP mode WORKS ANYWAY. Its own
+  # C source (`sway/commands/create_output.c`) hardcodes `wlr_headless_add_output(backend, 1920,
+  # 1080)` -- no argv of its own is ever read. Resizing afterward works because a headless
+  # output's mode LIST is always empty (`backend/headless/output.c` never populates
+  # `wlr_output->modes`), and sway's own `set_mode()` (`sway/config/output.c`) takes the
+  # CUSTOM-mode path whenever `wl_list_empty(&output->modes)` -- unconditionally, no `--custom`
+  # flag needed -- so any WxH this module asks for is accepted exactly, never snapped to a
+  # discrete list scroll would otherwise have to already know about.
+  #
+  # `or [ ]` on the read below, not a bare `.virtualOutputs`: this probe's VALUE is whatever
+  # attrset a composed host (or a check fixture) actually put under `nixdesktop.sessions.<name>`,
+  # which may predate this field existing at all -- the same tolerant-read discipline every other
+  # probe in this file already applies to a table that might not carry the leaf it wants yet.
+  virtualOutputLines =
+    if resolvedDesktopSession == null then [ ]
+    else lib.imap1
+      (i: o:
+        let headlessName = "HEADLESS-${toString (i + 1)}"; in
+        "exec ${scrollmsgBin} 'create_output; output ${quoteName headlessName} mode ${toString o.width}x${toString o.height}'")
+      (resolvedDesktopSession.virtualOutputs or [ ]);
+
   # A permitted device NAME that resolves in the probed inventory becomes its `cardPath` --
   # `/dev/dri/by-path/pci-<addr>-card` or `/dev/dri/by-path/platform-<addr>-card`, both stable at
   # eval time (see `permittedDrmDevices` below). A name the inventory does not contain (the
@@ -453,7 +509,11 @@ let
   };
   neutralStartup = map (c: "exec ${c}") nixdesktopStartupProbe.value;
 
-  startupLines = systemdStartupLines ++ neutralStartup ++ (map (c: "exec ${c}") cfg.startup);
+  # Ordered BEFORE the neutral contract and a host's own `cfg.startup`: a virtual output is
+  # infrastructure a LATER startup command (an agent's own browser, launched onto it) may already
+  # expect to exist -- see `virtualOutputLines`'s own comment, above `resolvedDesktopSession`, for
+  # the full mechanism and the measured HEADLESS-N offset.
+  startupLines = systemdStartupLines ++ virtualOutputLines ++ neutralStartup ++ (map (c: "exec ${c}") cfg.startup);
 
   optionalIf = cond: v: if cond then v else null;
 
