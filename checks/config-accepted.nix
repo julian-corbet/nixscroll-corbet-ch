@@ -112,7 +112,7 @@ let
       # never runs the shell command), so what this actually proves is that our quoting of the
       # whole line does not break the CONFIG file's own tokenizer, which would otherwise silently
       # swallow or truncate whatever comes after it.
-      nixdesktop.session = "devhome";
+      nixdesktop.session = "primary";
     };
   };
 
@@ -202,7 +202,7 @@ let
       # `virtualOutputLines`) through the real binary: two entries, so this also proves the
       # SECOND exec line's HEADLESS-3 addressing (not just the FALLBACK-offset HEADLESS-2 of the
       # first) parses cleanly, not merely the single-output case.
-      sessions.devhome = {
+      sessions.primary = {
         permittedDevices = [ ];
         deniedDevices = [ ];
         virtualOutputs = [

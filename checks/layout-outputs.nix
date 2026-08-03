@@ -183,8 +183,8 @@ let
   withSession = permittedDevices: { lib, ... }: {
     options.nixdesktop.sessions = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; };
     config = {
-      nixdesktop.sessions.devhome = { inherit permittedDevices; deniedDevices = [ ]; };
-      programs.scroll.nixdesktop.session = "devhome";
+      nixdesktop.sessions.primary = { inherit permittedDevices; deniedDevices = [ ]; };
+      programs.scroll.nixdesktop.session = "primary";
     };
   };
 
@@ -350,8 +350,8 @@ let
       let
         w = (evalScroll [
           { options.nixdesktop.autosessions = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; }; }
-          { config.nixdesktop.autosessions.devhome = { permittedDevices = [ ]; deniedDevices = [ ]; }; }
-          { config.programs.scroll.nixdesktop.session = "devhome"; }
+          { config.nixdesktop.autosessions.primary = { permittedDevices = [ ]; deniedDevices = [ ]; }; }
+          { config.programs.scroll.nixdesktop.session = "primary"; }
         ]).warnings;
         ours = lib.filter (m: has m "nixdesktop.sessions") w;
       in
@@ -401,25 +401,25 @@ let
       let
         a = (evalScroll [
           { options.nixdesktop.sessions = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; }; }
-          { config.nixdesktop.sessions.devhome = { permittedDevices = [ ]; deniedDevices = [ ]; }; }
-          { config.programs.scroll.nixdesktop.session = "typo-devhome"; }
+          { config.nixdesktop.sessions.primary = { permittedDevices = [ ]; deniedDevices = [ ]; }; }
+          { config.programs.scroll.nixdesktop.session = "typo-primary"; }
         ]).assertions;
         ours = lib.filter (x: has x.message "programs.scroll.nixdesktop.session") a;
       in
-      lib.length ours == 1 && !(lib.head ours).assertion && has (lib.head ours).message "devhome";
+      lib.length ours == 1 && !(lib.head ours).assertion && has (lib.head ours).message "primary";
 
     "naming NO session at all (null, the default) raises no failing assertion of our own" =
       let
         a = (evalScroll [
           { options.nixdesktop.sessions = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; }; }
-          { config.nixdesktop.sessions.devhome = { permittedDevices = [ ]; deniedDevices = [ ]; }; }
+          { config.nixdesktop.sessions.primary = { permittedDevices = [ ]; deniedDevices = [ ]; }; }
         ]).assertions;
       in
       lib.filter (x: has x.message "programs.scroll.nixdesktop.session") a == [ ];
 
     "naming a session with nixdesktop not composed at all fails the build, not silently" =
       let
-        a = (evalScroll [ { config.programs.scroll.nixdesktop.session = "devhome"; } ]).assertions;
+        a = (evalScroll [ { config.programs.scroll.nixdesktop.session = "primary"; } ]).assertions;
         ours = lib.filter (x: has x.message "programs.scroll.nixdesktop.session") a;
       in
       lib.length ours == 1 && !(lib.head ours).assertion;

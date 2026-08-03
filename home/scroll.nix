@@ -890,7 +890,7 @@ in
       session = mkOption {
         type = types.nullOr types.str;
         default = null;
-        example = "devhome";
+        example = "primary";
         description = ''
           Names a `nixdesktop.sessions.<name>` whose `permittedDevices` becomes
           `permittedDrmDevices` below -- read through `lib.probeFact`, same as `layout` above.
@@ -1055,7 +1055,7 @@ in
 
       # `nixdesktop.session` naming something that does not resolve used to leave
       # `permittedDrmDevices` silently empty, no warning, no assertion -- forceable with
-      # nixdesktop absent entirely and `session = "devhome"`: eval succeeds, warnings stay empty,
+      # nixdesktop absent entirely and `session = "primary"`: eval succeeds, warnings stay empty,
       # and a seated session ends up with NO permitted device, which is not a cosmetic gap, it is
       # the session opening no DRM device at all. Asserted here, alongside the value it protects
       # and for the identical "unconditional" reason: the failure is real whether or not

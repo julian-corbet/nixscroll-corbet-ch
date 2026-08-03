@@ -41,8 +41,8 @@ let
   withSession = extra: { lib, ... }: {
     options.nixdesktop.sessions = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; };
     config = {
-      nixdesktop.sessions.devhome = { permittedDevices = [ ]; deniedDevices = [ ]; virtualOutputs = [ ]; } // extra;
-      programs.scroll.nixdesktop.session = "devhome";
+      nixdesktop.sessions.primary = { permittedDevices = [ ]; deniedDevices = [ ]; virtualOutputs = [ ]; } // extra;
+      programs.scroll.nixdesktop.session = "primary";
     };
   };
 

@@ -229,7 +229,7 @@ that silently does nothing is worse than one that refuses to build.
 ```nix
 programs.scroll.nixdesktop = {
   layout = "docked";   # a nixdesktop.layouts.<name> — renders as `output` blocks
-  session = "devhome"; # a nixdesktop.sessions.<name> — feeds permittedDrmDevices below
+  session = "primary"; # a nixdesktop.sessions.<name> — feeds permittedDrmDevices below
 };
 ```
 
