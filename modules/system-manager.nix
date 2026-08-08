@@ -50,11 +50,108 @@
 # nixdesktop's own role table already documents for its `portals` capability. On Arch the package IS
 # the mechanism: pacman drops the `.portal` file and the D-Bus service into the one shared prefix
 # `xdg-desktop-portal` already reads.
+#
+# ── THE SECOND HALF: INSTALLING A BACKEND DOES NOT SELECT IT (`nixscroll.portals`) ───────────────
+#
+# `install.portal.enable` above puts the wlroots backend on the box. That is necessary and NOT
+# sufficient, and the gap between the two is a silent, compositor-specific failure this repo is the
+# right owner of. `xdg-desktop-portal` resolves each interface by reading a `portals.conf`; with no
+# matching one it falls back to the first backend it finds in lexicographical order. On a desktop
+# carrying the GNOME backend as well, `gnome` sorts before `wlr`, so GNOME wins
+# `org.freedesktop.impl.portal.Screenshot` and `...ScreenCast` — and its implementations are written
+# against Mutter's D-Bus screencast API, which does not exist in a scroll session. Screenshot and
+# screen sharing then fail with nothing in the log naming a portal, a backend, or a config file.
+#
+# WHY THE VENDOR FILE DOES NOT ALREADY COVER THIS. The `sway-scroll` AUR package ships
+# `/usr/share/xdg-desktop-portal/scroll-portals.conf`, whose contents are exactly right. It is a
+# `<desktop>-portals.conf`, so xdg-desktop-portal only ever reads it when `scroll` appears in
+# `XDG_CURRENT_DESKTOP` (portals.conf(5): the desktop names come from that variable, case-folded).
+# Nothing in a scroll session sets that variable — this repo's home/scroll.nix propagates it to the
+# D-Bus activation environment, which passes along whatever is there and does not create it — so on
+# a real host it is empty, no desktop-specific file is ever looked for, and the vendor file is inert
+# on the very compositor it was written for. `nixscroll.portals.pin` therefore writes the plain,
+# desktop-independent `portals.conf`, which is read whatever `XDG_CURRENT_DESKTOP` says.
+#
+# AND WHY NOT JUST SET `XDG_CURRENT_DESKTOP=scroll` INSTEAD. It would activate the vendor file, and
+# it would also change how every `.desktop` file on the box is filtered (`OnlyShowIn=`/`NotShowIn=`
+# are matched against that same variable), silently hiding or revealing application entries across
+# every launcher and menu. That is a far larger and less reversible blast radius than one config
+# file, for the same result, and it would leave the outcome depending on a file the AUR package
+# happens to ship. Pinning is the narrow fix; the variable stays a separate question.
 { lib, config, ... }:
 let
   cfg = config.nixscroll.install;
+  portalsCfg = config.nixscroll.portals;
+
+  # Mirrors the `sway-scroll` package's own `/usr/share/xdg-desktop-portal/scroll-portals.conf`
+  # verbatim apart from the configurable fallback -- deliberately, so this is upstream's answer for
+  # this compositor moved to a path that is actually read, rather than a policy invented here.
+  #
+  # `Inhibit=none` is upstream's line and is kept: the GTK backend's Inhibit implementation is
+  # GNOME-session-specific and answers anything but idle-inhibit with "Inhibiting other than idle
+  # not supported" (observed once per request on a live scroll session). `none` means the interface
+  # has no provider, so callers fall back to the Wayland idle-inhibit protocol scroll implements
+  # natively, instead of being handed a backend that errors.
+  portalsConf = ''
+    [preferred]
+    default=${portalsCfg.pin.fallback}
+    org.freedesktop.impl.portal.ScreenCast=wlr
+    org.freedesktop.impl.portal.Screenshot=wlr
+    org.freedesktop.impl.portal.Inhibit=none
+  '';
 in
 {
+  options.nixscroll.portals = {
+    pin.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Write `/etc/xdg-desktop-portal/portals.conf`, naming the wlroots backend for
+        `org.freedesktop.impl.portal.Screenshot` and `...ScreenCast`.
+
+        THE OTHER HALF OF `install.portal.enable`, and useless without a wlroots backend present.
+        Installing `xdg-desktop-portal-wlr` makes a backend available; it does not make
+        `xdg-desktop-portal` route anything to it. With no `portals.conf` matching the session,
+        interfaces are resolved by taking the first backend found in LEXICOGRAPHICAL order, so on
+        any host that also carries `xdg-desktop-portal-gnome` the GNOME backend wins both capture
+        interfaces -- and implements them against Mutter, which is not running. See the module
+        header for why the vendor `scroll-portals.conf` does not already prevent this.
+
+        WRITTEN TO /etc, NOT /usr/share, and that is the load-bearing part. portals.conf(5) ranks
+        the search path with the sysconfdir copy above `$XDG_DATA_DIRS`/`/usr/share`, and within
+        each location a desktop-specific `<desktop>-portals.conf` is only consulted for names
+        actually present in `XDG_CURRENT_DESKTOP`. A plain `portals.conf` under /etc is therefore
+        read whether or not that variable is ever set, and still outranks every vendor file if it
+        later is.
+
+        NOT A NIXOS OPTION. On NixOS the same selection is `xdg.portal.config`, and this repo's
+        `nixosModules.scroll` stays thin -- see the module header's "ARCH ONLY".
+      '';
+    };
+
+    pin.fallback = lib.mkOption {
+      type = lib.types.str;
+      default = "gtk";
+      example = "kde";
+      description = ''
+        Backend for every interface this pin does not name explicitly, written as `default=` in the
+        generated `portals.conf`.
+
+        `gtk` matches what both `xdg-desktop-portal-gtk` and the `sway-scroll` package pick for
+        themselves, and it is the right general answer on a wlroots session: the wlroots backend
+        implements the two capture interfaces and nothing else, so file chooser, settings, print
+        and the rest need a general backend behind it. Portals resolve per interface, not per
+        session, which is what makes naming two different backends in one file correct rather than
+        a conflict.
+
+        The value is a backend basename as it appears in `/usr/share/xdg-desktop-portal/portals/`
+        (`gtk` for `gtk.portal`), and the file it names must be installed -- naming a backend that
+        is not there leaves those interfaces unprovided. `none` is accepted by
+        xdg-desktop-portal itself and means "no provider"; `*` means "first found".
+      '';
+    };
+  };
+
   options.nixscroll.install = {
     enable = lib.mkEnableOption "installing scroll on an Arch/CachyOS host via nixarch's package reconciler";
 
@@ -136,9 +233,12 @@ in
         NOT A REPLACEMENT FOR THE GENERAL BACKENDS, and this option does not touch them. A desktop
         still wants the GTK backend for file chooser, settings, and the rest -- portals are
         resolved per interface, not per session, so the wlroots backend sits alongside them and
-        claims only what it is right for. Which backend wins for which interface is
-        `portals.conf`'s business (`/usr/share/xdg-desktop-portal/`, plus whatever a compositor
-        ships -- scroll's package installs its own `scroll-portals.conf`), not this module's.
+        claims only what it is right for.
+
+        INSTALLING IS NOT SELECTING, and this option only installs. Which backend wins for which
+        interface is `portals.conf`'s business, and on a host that also carries the GNOME backend
+        the answer without one is `gnome` -- lexicographical order, not correctness. Pair this with
+        `nixscroll.portals.pin.enable` to say it out loud; see the module header.
       '';
     };
   };
@@ -158,5 +258,19 @@ in
     (lib.mkIf cfg.wallpaper.enable { nixarch.packages.pacman = [ "swaybg" ]; })
     (lib.mkIf cfg.outputControl.enable { nixarch.packages.pacman = [ "wlr-randr" ]; })
     (lib.mkIf cfg.portal.enable { nixarch.packages.pacman = [ "xdg-desktop-portal-wlr" ]; })
+
+    # `replaceExisting` unconditionally, for the reason nixarch's own modules/foreign-service.nix
+    # (gotcha (a)) and modules/logrotate.nix both give: system-manager DEFAULTS it to false and
+    # then silently declines to write an entry whose destination already exists -- no error, no
+    # warning, a module that reads as applied and did nothing. This path is unoccupied on a stock
+    # Arch box (no package ships /etc/xdg-desktop-portal/), but "unoccupied today" is exactly the
+    # assumption that trap punishes, and a hand-written portals.conf is a plausible thing to find
+    # on a host somebody already tried to fix by hand.
+    (lib.mkIf portalsCfg.pin.enable {
+      environment.etc."xdg-desktop-portal/portals.conf" = {
+        replaceExisting = true;
+        text = portalsConf;
+      };
+    })
   ];
 }
