@@ -2,13 +2,14 @@
 
 Declarative config generation for [scroll](https://github.com/dawsers/scroll) — a fork of
 [sway](https://github.com/swaywm/sway) with a scrolling, PaperWM-style tiling layout — plus the
-packaging and system wiring scroll needs since, unlike sway, it isn't in nixpkgs. Three outputs:
+packaging and system wiring scroll needs since, unlike sway, it isn't in nixpkgs. Four outputs:
 a package passthrough, a home-manager module that writes `~/.config/scroll/config` from
-structured options, and a thin NixOS module for the system side.
+structured options, a thin NixOS module for the system side, and an Arch/CachyOS plane that names
+packages for a distro reconciler instead of installing any.
 
 ## The split
 
-Three pieces, because scroll not being in nixpkgs is a real constraint that shapes the whole repo:
+Four pieces, because scroll not being in nixpkgs is a real constraint that shapes the whole repo:
 
 **Packaging** (`packages.<system>.scroll`) — a straight passthrough of
 [Diax170/scroll-flake](https://github.com/Diax170/scroll-flake)'s own `packages.<system>.default`.
@@ -31,6 +32,16 @@ deliberately thin — no wrapper features, no XDG portal config, no extra packag
 that fuller sway.nix-style module, scroll-flake ships its own `nixosModules.default` under this
 same namespace; use one or the other, not both, since they'd both try to own `programs.scroll`.
 
+**Arch/CachyOS** (`systemManagerModules.scroll`, namespace `nixscroll.install`) — the same job as
+the NixOS module on a distro whose packages come from pacman, and therefore the opposite shape: it
+installs nothing and publishes NAMES into `nixarch.packages.{aur,pacman}`, because the distro's own
+copy is what actually runs. scroll itself is the AUR's `sway-scroll`; alongside it sit three
+optional wlroots companions — `swaybg`, `wlr-randr` and `xdg-desktop-portal-wlr` — each of which
+talks to a protocol extension scroll implements by being a sway fork, and is inert on a compositor
+that is not one. Each is its own boolean and all are off by default. The portal backend in
+particular is what provides screencast and screenshot on a wlroots session; a GNOME backend is
+written against Mutter's D-Bus API and does not serve them here.
+
 Neither the config-generation module nor the NixOS module invents its own option namespace per
 project convention — both use `programs.scroll`, matching how nixpkgs itself names
 `programs.sway` and how scroll-flake already named its own NixOS module, so the same mental model
@@ -43,6 +54,7 @@ project convention — both use `programs.scroll`, matching how nixpkgs itself n
 | `packages.<system>.scroll` | flake package | passthrough of `Diax170/scroll-flake`'s `packages.<system>.default` |
 | `homeManagerModules.scroll` (`.default`) | home-manager | `~/.config/scroll/config`, generated from `programs.scroll.*`. Installs nothing. |
 | `nixosModules.scroll` (`.default`) | NixOS | `environment.systemPackages` + `services.displayManager.sessionPackages` for `programs.scroll.package` |
+| `systemManagerModules.scroll` (`.default`) | [system-manager](https://github.com/numtide/system-manager) (Arch/CachyOS) | package NAMES only, into `nixarch.packages.{aur,pacman}`: scroll itself from the AUR, plus the optional wlroots companions — `swaybg` (wallpaper), `wlr-randr` (runtime output control), `xdg-desktop-portal-wlr` (the screencast/screenshot portal backend). Installs nothing; the host's reconciler does. |
 
 ## Not scroll's own named keymap modes
 

@@ -123,6 +123,14 @@
           scroll = self.packages.${system}.scroll;
           inherit scrollModule;
         };
+        # The Arch plane, which `nix flake check` likewise never evaluates on its own. Its whole
+        # output is WHICH OF TWO PACKAGE LISTS each name lands in, and on this platform the wrong
+        # answer in one direction fails the host's entire pacman transaction -- see the check's own
+        # header.
+        arch-packages = import ./checks/arch-packages.nix {
+          pkgs = nixpkgs.legacyPackages.${system};
+          systemManagerModule = self.systemManagerModules.scroll;
+        };
       });
 
       formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixpkgs-fmt);
