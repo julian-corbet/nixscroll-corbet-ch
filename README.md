@@ -44,12 +44,16 @@ and screenshot on a wlroots session; a GNOME backend is written against Mutter's
 not serve them here.
 
 Installing that backend does not select it, which is why `nixscroll.portals.pin.enable` exists as a
-separate switch. `xdg-desktop-portal` resolves each interface through a `portals.conf`, and with
-none matching the session it takes the first backend it finds in *lexicographical* order — so on a
-host that also carries `xdg-desktop-portal-gnome`, `gnome` wins `Screenshot` and `ScreenCast` and
-serves them against a Mutter that is not running. The failure has no log line naming a portal, a
-backend, or a config file. The pin writes `/etc/xdg-desktop-portal/portals.conf` naming `wlr` for
-those two interfaces and a configurable fallback (`pin.fallback`, default `gtk`) for the rest.
+separate switch. `xdg-desktop-portal` resolves each interface through a `portals.conf`; failing
+that through the deprecated `UseIn` key matched against `XDG_CURRENT_DESKTOP`; and failing that
+through one last resort, which is `xdg-desktop-portal-gtk` *specifically*. On a scroll session
+there is no matching config file and no `XDG_CURRENT_DESKTOP`, so every interface resolves to
+gtk-or-nothing — and gtk implements neither `Screenshot` nor `ScreenCast`. An interface with no
+implementation is not exported on the bus at all, so a client asking for a screenshot finds no such
+interface, with no log line naming a portal, a backend, or a config file. An installed
+`xdg-desktop-portal-gnome` does not step in: the last resort considers only gtk, so it sits inert.
+The pin writes `/etc/xdg-desktop-portal/portals.conf` naming `wlr` for those two interfaces and a
+configurable fallback (`pin.fallback`, default `gtk`) for the rest.
 
 The `sway-scroll` package does ship a correct `scroll-portals.conf`, and it never loads: a
 `<desktop>-portals.conf` is only read when that name appears in `XDG_CURRENT_DESKTOP`, and nothing

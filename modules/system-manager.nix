@@ -55,12 +55,35 @@
 #
 # `install.portal.enable` above puts the wlroots backend on the box. That is necessary and NOT
 # sufficient, and the gap between the two is a silent, compositor-specific failure this repo is the
-# right owner of. `xdg-desktop-portal` resolves each interface by reading a `portals.conf`; with no
-# matching one it falls back to the first backend it finds in lexicographical order. On a desktop
-# carrying the GNOME backend as well, `gnome` sorts before `wlr`, so GNOME wins
-# `org.freedesktop.impl.portal.Screenshot` and `...ScreenCast` — and its implementations are written
-# against Mutter's D-Bus screencast API, which does not exist in a scroll session. Screenshot and
-# screen sharing then fail with nothing in the log naming a portal, a backend, or a config file.
+# right owner of.
+#
+# `xdg-desktop-portal` performs no capture itself; it resolves each interface to a backend and, if
+# it finds none, does not export that interface on the bus AT ALL. Resolution order, from
+# `xdp_portal_config_find()` in xdg-desktop-portal 1.22.1:
+#
+#   1. each loaded `portals.conf`, in precedence order: the interface-specific key first, then
+#      `default`. A named backend that is not installed, or that does not implement the interface,
+#      is skipped rather than failing the lookup.
+#   2. failing that, the DEPRECATED `UseIn` key in each `.portal` file, matched against the desktop
+#      names in `XDG_CURRENT_DESKTOP`.
+#   3. failing that, one last resort: `xdg-desktop-portal-gtk` SPECIFICALLY, if it implements the
+#      interface. Not "the first backend found", not lexicographical order — only gtk.
+#
+# On a scroll session with no `portals.conf` (see below) and an empty `XDG_CURRENT_DESKTOP`, steps 1
+# and 2 are both no-ops, so EVERY interface resolves to gtk-or-nothing. `gtk.portal` implements
+# neither `org.freedesktop.impl.portal.Screenshot` nor `...ScreenCast`, so both are unresolved and
+# `org.freedesktop.portal.Screenshot` and `...ScreenCast` are never exported. A client asking for a
+# screenshot finds no such interface on the bus, and nothing in the log names a portal, a backend,
+# or a missing config file.
+#
+# NOTE WHAT DOES *NOT* HAPPEN, because it is the intuitive guess and it is wrong: an installed
+# `xdg-desktop-portal-gnome` does NOT win those interfaces. It is never reached — step 3 considers
+# only gtk — so it sits inert, never even D-Bus-activated, while capture stays broken. Verified on a
+# live host: `busctl --user introspect org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop`
+# listed no Screenshot and no ScreenCast interface, and only the gtk backend process was running.
+# The GNOME backend is still the wrong thing to have installed on a wlroots box, but it is wrong as
+# dead weight that would become a candidate the moment `XDG_CURRENT_DESKTOP` mentioned gnome (its
+# `UseIn=gnome`), not as something actively stealing capture today.
 #
 # WHY THE VENDOR FILE DOES NOT ALREADY COVER THIS. The `sway-scroll` AUR package ships
 # `/usr/share/xdg-desktop-portal/scroll-portals.conf`, whose contents are exactly right. It is a
@@ -111,11 +134,13 @@ in
 
         THE OTHER HALF OF `install.portal.enable`, and useless without a wlroots backend present.
         Installing `xdg-desktop-portal-wlr` makes a backend available; it does not make
-        `xdg-desktop-portal` route anything to it. With no `portals.conf` matching the session,
-        interfaces are resolved by taking the first backend found in LEXICOGRAPHICAL order, so on
-        any host that also carries `xdg-desktop-portal-gnome` the GNOME backend wins both capture
-        interfaces -- and implements them against Mutter, which is not running. See the module
-        header for why the vendor `scroll-portals.conf` does not already prevent this.
+        `xdg-desktop-portal` route anything to it. With no `portals.conf` matching the session and
+        no `XDG_CURRENT_DESKTOP` set, resolution falls through to its last resort, which is
+        `xdg-desktop-portal-gtk` specifically -- and gtk implements NEITHER capture interface. So
+        both go unresolved, and an interface with no implementation is not exported on the bus at
+        all: a client asking for a screenshot finds nothing there to ask. See the module header for
+        the full resolution order, for why an installed GNOME backend does not step in, and for why
+        the vendor `scroll-portals.conf` does not already prevent this.
 
         WRITTEN TO /etc, NOT /usr/share, and that is the load-bearing part. portals.conf(5) ranks
         the search path with the sysconfdir copy above `$XDG_DATA_DIRS`/`/usr/share`, and within
@@ -235,10 +260,12 @@ in
         resolved per interface, not per session, so the wlroots backend sits alongside them and
         claims only what it is right for.
 
-        INSTALLING IS NOT SELECTING, and this option only installs. Which backend wins for which
-        interface is `portals.conf`'s business, and on a host that also carries the GNOME backend
-        the answer without one is `gnome` -- lexicographical order, not correctness. Pair this with
-        `nixscroll.portals.pin.enable` to say it out loud; see the module header.
+        INSTALLING IS NOT SELECTING, and this option only installs. Which backend serves which
+        interface is `portals.conf`'s business, and with no such file the answer for both capture
+        interfaces is NOTHING AT ALL -- resolution falls through to a gtk-only last resort that
+        implements neither, leaving them unexported and this package unreachable however correctly
+        it is installed. Pair this with `nixscroll.portals.pin.enable` to say it out loud; see the
+        module header.
       '';
     };
   };
