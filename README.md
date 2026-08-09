@@ -71,6 +71,7 @@ project convention — both use `programs.scroll`, matching how nixpkgs itself n
 |---|---|---|
 | `packages.<system>.scroll` | flake package | passthrough of `Diax170/scroll-flake`'s `packages.<system>.default` |
 | `homeManagerModules.scroll` (`.default`) | home-manager | `~/.config/scroll/config`, generated from `programs.scroll.*`. Installs nothing. |
+| `homeManagerModules.ipcCompat` | home-manager | a sway-IPC compatibility proxy (`programs.scroll.ipcCompat`) plus its user unit — see [Strict sway clients](#strict-sway-clients) below. Installs nothing. |
 | `nixosModules.scroll` (`.default`) | NixOS | `environment.systemPackages` + `services.displayManager.sessionPackages` for `programs.scroll.package` |
 | `systemManagerModules.scroll` (`.default`) | [system-manager](https://github.com/numtide/system-manager) (Arch/CachyOS) | package NAMES into `nixarch.packages.{aur,pacman}`: scroll itself from the AUR, plus the optional wlroots companions — `swaybg` (wallpaper), `wlr-randr` (runtime output control), `xdg-desktop-portal-wlr` (the screencast/screenshot portal backend). Installs nothing; the host's reconciler does. Also `/etc/xdg-desktop-portal/portals.conf` when `nixscroll.portals.pin.enable` is set — the only file this module writes. |
 
@@ -87,6 +88,61 @@ not scroll. Real scroll-specific directives (`layout_*`, `animations`, `jump_lab
 `gesture_scroll_*`, `snap_*`, ...) get real options below. Keymaps of any kind — including
 overriding scroll's own named modes with different keys — go through the generic
 `programs.scroll.binds`/`programs.scroll.modes` escape hatch.
+
+## Strict sway clients
+
+scroll speaks sway's IPC protocol, so every sway client finds it. What it does not do is speak
+sway's exact **schema**, and a client that deserializes strictly — Rust clients built on `swayipc`
+are the common case — dies on the difference:
+
+```
+scroll:  layout = horizontal | vertical | none | output
+sway:    layout = splith | splitv | stacked | tabbed | output | dockarea | none
+```
+
+`unknown variant 'vertical', expected one of ...`, and that part of the client is gone. Neither side
+is misbehaving: the compositor reports its own layout model honestly, and the client validates
+against the schema it was written for. It is scroll that diverged, so the fix lives here.
+
+`homeManagerModules.ipcCompat` puts a proxy in front of the compositor socket and rewrites three
+things on the way out. It **installs nothing** — the script is written as a config file and
+`interpreter` names what runs it (`/usr/bin/env python3` by default; a NixOS consumer sets
+`"${pkgs.python3}/bin/python3"`).
+
+```nix
+imports = [ inputs.nixscroll.homeManagerModules.ipcCompat ];
+
+programs.scroll.ipcCompat = {
+  enable = true;
+  favorites = [ 1 2 3 4 5 ];   # only if your client pins workspace buttons
+};
+```
+
+Then point the client at it. **Both halves are required**:
+
+```nix
+systemd.user.services.my-bar.Service = {
+  Environment = [ "SWAYSOCK=${config.programs.scroll.ipcCompat.socketPath}" ];
+  UnsetEnvironment = config.programs.scroll.ipcCompat.unsetVariables;
+};
+```
+
+Setting `SWAYSOCK` **alone is inert**. scroll exports `SCROLLSOCK` into the systemd user
+environment, and a sway client library probes the socket variables in its own priority order, so it
+finds that one first and connects straight past the proxy. Nothing errors — the client simply
+behaves as though the proxy were not installed, which is indistinguishable from the proxy being
+broken.
+
+`favorites` gates the other two rewrites and exists for clients with pinned workspace buttons. A
+compositor's workspace `id` is a **container** id, not the workspace number, so a client that has
+only ever seen a workspace by name parses the name as a number and then finds no workspace with
+that id — its focus call resolves to nothing and returns silently, and the click appears to do
+nothing at all. Those numbers are therefore re-keyed to `id == num`, synthesised into
+`GET_WORKSPACES` when the workspace does not exist yet, and shielded from the `change: "empty"`
+event that would otherwise delete their buttons the first time you leave one. Leave the list empty
+and only the layout rewrite runs.
+
+Reported upstream as [ironbar#1584](https://github.com/JakeStanger/ironbar/issues/1584).
 
 ## Software rendering
 

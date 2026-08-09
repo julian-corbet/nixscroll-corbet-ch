@@ -72,6 +72,13 @@
       homeManagerModules = {
         scroll = scrollModule;
         default = scrollModule;
+
+        # A proxy that makes scroll's IPC readable by clients whose deserializer validates against
+        # sway's schema. Separate module, separate opt-in: it is not config generation, it renders
+        # a program and a unit, and a consumer with no such client wants none of it. It is here
+        # rather than in each client's own project because scroll is the party that diverged from
+        # the schema — see home/ipc-compat.nix's header, and ironbar#1584.
+        ipcCompat = ./home/ipc-compat.nix;
       };
 
       # ── CHECKS ────────────────────────────────────────────────────────────────────────────
@@ -94,6 +101,12 @@
         startup-contract = import ./checks/startup-contract.nix {
           pkgs = nixpkgs.legacyPackages.${system};
           inherit scrollModule;
+        };
+        # home/ipc-compat.nix. It writes a PROGRAM as text, so nothing else type-checks it, and its
+        # two most consequential values (the shebang, and the list of variables a client must
+        # unset) both fail silently rather than loudly — see the check's own header.
+        ipc-compat = import ./checks/ipc-compat.nix {
+          pkgs = nixpkgs.legacyPackages.${system};
         };
         # Evaluates the nixdesktop.layouts/nixdesktop.monitors/nixdesktop.sessions translation --
         # transform inversion, identity-with-spaces quoting, alias fan-out, disabled outputs,
