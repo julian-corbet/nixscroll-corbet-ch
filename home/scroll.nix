@@ -473,9 +473,29 @@ let
 
   # ── startup ───────────────────────────────────────────────────────────────────────────
   scrollmsgBin = if cfg.package != null then "${cfg.package}/bin/scrollmsg" else "scrollmsg";
+  # `reset-failed` + `restart`, NOT `start` -- this is the CRASH path, and it is the
+  # only one there is. The `subscribe '["shutdown"]'` line below tears the target
+  # down when the compositor exits CLEANLY; a compositor that dies on a signal
+  # emits no shutdown event, and the subscriber dies with it, so that line never
+  # runs. The target is therefore still `active` when the supervisor starts a
+  # replacement compositor -- and a plain `start` on an active target is a no-op.
+  #
+  # What that costs, when the session's own components are `PartOf` the target:
+  # each one loses its Wayland connection, exits, gets restarted by its own
+  # `Restart=` policy against a compositor that is not accepting clients yet,
+  # and burns its `StartLimitBurst` within seconds. They then stay dead. The
+  # session comes back with no bar, no notifier, no polkit agent -- and if an
+  # output-management daemon is among them, every display reverts to its
+  # unmanaged defaults, which reads as "the desktop reset itself" rather than
+  # "the compositor restarted".
+  #
+  # `restart` cycles the target unconditionally: a no-op start becomes a real
+  # stop+start, so components are torn down and brought back in the correct
+  # order against the NEW compositor. `reset-failed` first, because units that
+  # already exhausted their start limit are refused a restart otherwise.
   systemdStartupLines = optionals cfg.systemd.enable [
     "exec dbus-update-activation-environment --systemd DISPLAY WAYLAND_DISPLAY I3SOCK SWAYSOCK SCROLLSOCK XDG_CURRENT_DESKTOP XDG_SESSION_TYPE"
-    "exec \"systemctl --user import-environment {,WAYLAND_}DISPLAY I3SOCK SWAYSOCK SCROLLSOCK; systemctl --user start scroll-session.target\""
+    "exec \"systemctl --user import-environment {,WAYLAND_}DISPLAY I3SOCK SWAYSOCK SCROLLSOCK; systemctl --user reset-failed; systemctl --user restart scroll-session.target\""
     "exec ${scrollmsgBin} -t subscribe '[\"shutdown\"]' && systemctl --user stop scroll-session.target"
   ];
   # The neutral `nixdesktop.startup` contract, consumed rather than hand-wired: nixdesktop
