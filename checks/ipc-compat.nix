@@ -115,8 +115,17 @@ let
     "Type=exec, so a missing interpreter fails the start instead of reporting success" =
       pinnedUnit.Service.Type == "exec";
     "it is bound to graphical-session.target, where SWAYSOCK actually exists" =
-      pinnedUnit.Unit.Requisite == [ "graphical-session.target" ]
+      pinnedUnit.Unit.PartOf == [ "graphical-session.target" ]
       && pinnedUnit.Install.WantedBy == [ "graphical-session.target" ];
+    # THE REGRESSION THIS PINS. A client of this proxy declares `After=` on it and is itself
+    # `WantedBy=graphical-session.target`; systemd orders a target after what it pulls in. Order
+    # the proxy after that same target and the loop closes, systemd deletes the CLIENT's start job
+    # to break it, and the bar never appears — no failure, nothing logged against it. See the
+    # module's own header comment on `After=` for the journal lines. Either directive coming back
+    # puts that boot-time disappearance straight back.
+    "it is NOT ordered after graphical-session.target — that closes a cycle through its clients" =
+      pinnedUnit.Unit.After == [ "graphical-session-pre.target" ]
+      && !(pinnedUnit.Unit ? Requisite);
 
     # ── the two off switches ──────────────────────────────────────────────────────────────────
     "enableService = false writes the script but declares no unit" =

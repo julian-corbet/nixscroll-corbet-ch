@@ -362,11 +362,29 @@ in
           Description = "sway-IPC compatibility proxy for scroll";
           Documentation = [ "https://github.com/JakeStanger/ironbar/issues/1584" ];
           PartOf = [ "graphical-session.target" ];
-          After = [ "graphical-session.target" ];
-          # Requisite, not Requires: the proxy reads SWAYSOCK out of the systemd user environment,
-          # which the compositor itself puts there on startup. Starting before there is a session
-          # would not fail interestingly, it would fail on a missing variable.
-          Requisite = [ "graphical-session.target" ];
+          # ORDERED BEFORE THE TARGET COMPLETES, NOT AFTER IT, AND THIS IS NOT A STYLE CHOICE.
+          # This proxy exists to be depended on: its whole published contract (see `serviceName`)
+          # is that a client — a bar, a workspace widget — declares `Requires=`/`After=` on it.
+          # Those clients are themselves `WantedBy=graphical-session.target`, and systemd orders a
+          # target after the units it pulls in. So an `After=graphical-session.target` here closes
+          # a loop: target → client → proxy → target. systemd breaks such a loop by DELETING one
+          # job, silently, and the job it picked in practice was the client's:
+          #
+          #   Found ordering cycle: graphical-session.target/verify-active after bar.service/start
+          #     after scroll-ipc-compat.service/start - after graphical-session.target
+          #   Job bar.service/start deleted to break ordering cycle
+          #
+          # The bar then sits at `inactive (dead)` with nothing failed and nothing logged against
+          # it — it simply never appears after a reboot. `graphical-session-pre.target` gives the
+          # ordering that was actually wanted (not before the session exists) without being inside
+          # the cycle. `Requisite=` is gone for the same reason: it enqueues a verify-active job on
+          # graphical-session.target, which is the very node the loop closed through.
+          #
+          # Starting a moment early is already handled, and was before this: the proxy reads
+          # SWAYSOCK out of the systemd user environment, which the compositor puts there on
+          # startup, so a too-early start fails on a missing variable and `Restart=on-failure` with
+          # `RestartSec=1` below picks it straight back up.
+          After = [ "graphical-session-pre.target" ];
         };
         Service = {
           # `exec`, not `simple`: systemd then holds dependent units until the interpreter has
