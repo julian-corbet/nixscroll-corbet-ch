@@ -57,6 +57,7 @@ let
   companionsOnly = evaluate {
     nixscroll.install = {
       wallpaper.enable = true;
+      wallpaperPicker.enable = true;
       outputControl.enable = true;
       portal.enable = true;
     };
@@ -66,6 +67,7 @@ let
       enable = true;
       aurPackage = "sway-scroll-git";
       wallpaper.enable = true;
+      wallpaperPicker.enable = true;
       outputControl.enable = true;
       portal.enable = true;
     };
@@ -87,10 +89,10 @@ let
     "aurPackage is honoured rather than hardcoded" =
       lib.elem "sway-scroll-git" everything.aur && !(lib.elem "sway-scroll" everything.aur);
 
-    # The three companions are official-repo names; the reverse leak (a repo name sent to an AUR
+    # All four companions are official-repo names; the reverse leak (a repo name sent to an AUR
     # helper) is not fatal but is a needless source build, so it is checked in both directions too.
     "the companions go to the pacman list and never to the AUR one" =
-      sorted companionsOnly.pacman == [ "swaybg" "wlr-randr" "xdg-desktop-portal-wlr" ]
+      sorted companionsOnly.pacman == [ "azote" "swaybg" "wlr-randr" "xdg-desktop-portal-wlr" ]
       && companionsOnly.aur == [ ];
 
     # The load-bearing independence claim from the module's own header: the companions are NOT
@@ -99,12 +101,21 @@ let
     "the companions do not depend on the compositor's own install being enabled" =
       companionsOnly.pacman != [ ];
 
-    # ...and each companion is independent of the other two, so enabling one cannot drag in three.
+    # ...and each companion is independent of the other three, so enabling one cannot drag in four.
     "each companion is its own decision" =
       (evaluate { nixscroll.install.portal.enable = true; }).pacman == [ "xdg-desktop-portal-wlr" ];
 
+    # Asserted specifically for the pair that a reader is most likely to assume implies the other:
+    # azote is a front end for swaybg, but the picker does NOT pull in the tool, because a host that
+    # wants the wallpaper mechanism without a GUI browser for it is the ordinary case.
+    "the wallpaper picker does not imply the wallpaper tool" =
+      (evaluate { nixscroll.install.wallpaperPicker.enable = true; }).pacman == [ "azote" ];
+
+    "the wallpaper tool does not imply the picker" =
+      (evaluate { nixscroll.install.wallpaper.enable = true; }).pacman == [ "swaybg" ];
+
     "both halves compose without either erasing the other" =
-      sorted everything.pacman == [ "swaybg" "wlr-randr" "xdg-desktop-portal-wlr" ]
+      sorted everything.pacman == [ "azote" "swaybg" "wlr-randr" "xdg-desktop-portal-wlr" ]
       && everything.aur == [ "sway-scroll-git" ];
 
     # ── The portals pin ────────────────────────────────────────────────────────────────────────

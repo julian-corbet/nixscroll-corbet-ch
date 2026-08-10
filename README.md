@@ -36,10 +36,12 @@ same namespace; use one or the other, not both, since they'd both try to own `pr
 `nixscroll.portals`) — the same job as the NixOS module on a distro whose packages come from
 pacman, and therefore the opposite shape: it installs nothing and publishes NAMES into
 `nixarch.packages.{aur,pacman}`, because the distro's own copy is what actually runs. scroll itself
-is the AUR's `sway-scroll`; alongside it sit three optional wlroots companions — `swaybg`,
-`wlr-randr` and `xdg-desktop-portal-wlr` — each of which talks to a protocol extension scroll
-implements by being a sway fork, and is inert on a compositor that is not one. Each is its own
-boolean and all are off by default. The portal backend in particular is what provides screencast
+is the AUR's `sway-scroll`; alongside it sit four optional companions. Three are wlroots tools —
+`swaybg`, `wlr-randr` and `xdg-desktop-portal-wlr` — each of which talks to a protocol extension
+scroll implements by being a sway fork, and is inert on a compositor that is not one. The fourth,
+`azote`, is the wallpaper picker: it speaks no wlroots protocol itself and belongs here because it
+drives `swaybg`, the binary the compositor already spawns, rather than replacing it. Each is its
+own boolean and all are off by default. The portal backend in particular is what provides screencast
 and screenshot on a wlroots session; a GNOME backend is written against Mutter's D-Bus API and does
 not serve them here.
 
@@ -73,7 +75,7 @@ project convention — both use `programs.scroll`, matching how nixpkgs itself n
 | `homeManagerModules.scroll` (`.default`) | home-manager | `~/.config/scroll/config`, generated from `programs.scroll.*`. Installs nothing. |
 | `homeManagerModules.ipcCompat` | home-manager | a sway-IPC compatibility proxy (`programs.scroll.ipcCompat`) plus its user unit — see [Strict sway clients](#strict-sway-clients) below. Installs nothing. |
 | `nixosModules.scroll` (`.default`) | NixOS | `environment.systemPackages` + `services.displayManager.sessionPackages` for `programs.scroll.package` |
-| `systemManagerModules.scroll` (`.default`) | [system-manager](https://github.com/numtide/system-manager) (Arch/CachyOS) | package NAMES into `nixarch.packages.{aur,pacman}`: scroll itself from the AUR, plus the optional wlroots companions — `swaybg` (wallpaper), `wlr-randr` (runtime output control), `xdg-desktop-portal-wlr` (the screencast/screenshot portal backend). Installs nothing; the host's reconciler does. Also `/etc/xdg-desktop-portal/portals.conf` when `nixscroll.portals.pin.enable` is set — the only file this module writes. |
+| `systemManagerModules.scroll` (`.default`) | [system-manager](https://github.com/numtide/system-manager) (Arch/CachyOS) | package NAMES into `nixarch.packages.{aur,pacman}`: scroll itself from the AUR, plus the optional companions — `swaybg` (wallpaper), `azote` (the picker that drives it), `wlr-randr` (runtime output control), `xdg-desktop-portal-wlr` (the screencast/screenshot portal backend). Installs nothing; the host's reconciler does. Also `/etc/xdg-desktop-portal/portals.conf` when `nixscroll.portals.pin.enable` is set — the only file this module writes. |
 
 ## Not scroll's own named keymap modes
 

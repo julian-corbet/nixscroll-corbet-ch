@@ -22,18 +22,26 @@
 #
 # ── THE COMPANIONS, AND WHY THEY BELONG TO THIS REPO RATHER THAN A DESKTOP LAYER ────────────────
 #
-# Three protocol-specific tools below (`wallpaper`, `outputControl`, `portal`). Each one talks to a
-# wlroots protocol extension that scroll implements BY BEING A SWAY FORK, and each one is inert or
-# absent on a compositor that is not one — a GNOME or KDE session has its own wallpaper mechanism,
+# Four tools below (`wallpaper`, `wallpaperPicker`, `outputControl`, `portal`). Three of them talk
+# to a wlroots protocol extension that scroll implements BY BEING A SWAY FORK, and each one is inert
+# or absent on a compositor that is not one — a GNOME or KDE session has its own wallpaper mechanism,
 # its own output-management protocol and its own portal backend, and would gain nothing from these.
 # So they are not "desktop furniture a host might also want": they are the parts of a working
 # session that are true of THIS compositor family and no other, which is exactly the subject this
 # repo owns.
 #
+# `wallpaperPicker` (azote) EARNS ITS PLACE ON A DIFFERENT ARGUMENT, and the difference is worth
+# stating rather than blurring: azote speaks no wlroots protocol at all, and its own upstream
+# description covers "some X11 WMs" too. It belongs here because it DRIVES `swaybg` — the binary
+# this compositor already spawns through sway's inherited `swaybg_command` — rather than replacing
+# it. It is the picker for a mechanism this repo already owns, which is why it sits beside
+# `wallpaper` instead of in a general desktop layer.
+#
 # INDEPENDENT OPTIONS, NOT ONE `companions.enable`. A host that runs scroll under a display manager
 # on a machine with one fixed output has no use for a runtime output tool, and a host that never
-# screen-shares does not need a portal backend running. Lumping them would mean enabling any of the
-# three installs all of them; each is therefore its own boolean, and none is on by default.
+# screen-shares does not need a portal backend running. A headless or single-purpose box wants
+# neither wallpaper half. Lumping them would mean enabling any one of them installs all four; each
+# is therefore its own boolean, and none is on by default.
 #
 # NOT GATED ON `enable`, DELIBERATELY. `enable` above answers "does this box install scroll from the
 # AUR" — and a host may legitimately answer no while still running scroll: `nixdesktop`'s own role
@@ -215,6 +223,38 @@ in
       '';
     };
 
+    wallpaperPicker.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Install `azote`, the wallpaper and colour manager for wlroots compositors (official Arch
+        `extra`, `any` architecture -- it is Python, so there is no v3/v4 rebuild of it to prefer).
+
+        IT DRIVES `swaybg` RATHER THAN REPLACING IT, which is the whole reason this sits beside
+        `wallpaper.enable` rather than in a general desktop layer. azote is a GTK front end that
+        browses a directory of images, previews them per output, and applies one by invoking the
+        same `swaybg` the compositor already spawns. It therefore needs `wallpaper.enable` to be
+        good for anything, and this option deliberately does NOT imply it -- see the independence
+        note in the module header. Enabling the picker alone installs a browser for a mechanism
+        that is not on the box.
+
+        A TOOL YOU LAUNCH, NOT A DAEMON. Nothing of azote survives closing its window, so the
+        steady-state cost of this option is nil: what stays resident is the `swaybg` process the
+        compositor was already running.
+
+        WHAT IT WRITES, AND WHY A CONSUMER MAY WANT TO IGNORE IT. azote maintains its own
+        `~/.azotebg` shell script and expects the session to execute it at startup -- that is its
+        native persistence mechanism, and taking it means a wallpaper that lives in a generated
+        file no declaration owns. The alternative, and the one this repo is shaped for, is to keep
+        scroll's own `output <name> background ...` directive (`programs.scroll`'s per-output
+        `background`, home/scroll.nix) as the single source of truth and treat azote purely as a
+        previewer whose result you transcribe into that declaration. On a host that chooses the
+        second, the absent `~/.azotebg` autostart is the intended design and not a gap to close.
+
+        Off by default.
+      '';
+    };
+
     outputControl.enable = lib.mkOption {
       type = lib.types.bool;
       default = false;
@@ -275,14 +315,16 @@ in
       nixarch.packages.aur = [ cfg.aurPackage ];
     })
 
-    # The three companions are official-repo names on upstream Arch, so they go to the pacman half
-    # rather than the AUR one -- verified against `pacman -Si` on two live CachyOS hosts (each
-    # served as a `cachyos-extra-v3` rebuild, which is a rebuild of the Arch repo rather than a
-    # derivative-only package) and against archlinux.org's package search, with the AUR RPC
-    # returning nothing for any of the three. One `mkIf` each rather than a computed list: these
-    # are independent decisions, and a list would only re-introduce the ordering question that a
-    # merge of three singleton lists does not have.
+    # All four companions are official-repo names on upstream Arch, so they go to the pacman half
+    # rather than the AUR one -- verified against `pacman -Si` on two live CachyOS hosts and against
+    # archlinux.org's package search, with the AUR RPC returning nothing for any of the four. The
+    # three wlroots tools are served here as `cachyos-extra-v3` rebuilds (a rebuild of the Arch repo
+    # rather than a derivative-only package); `azote` is `any`-architecture Python and is served
+    # straight from `extra` with no v3 variant to prefer. One `mkIf` each rather than a computed
+    # list: these are independent decisions, and a list would only re-introduce the ordering
+    # question that a merge of singleton lists does not have.
     (lib.mkIf cfg.wallpaper.enable { nixarch.packages.pacman = [ "swaybg" ]; })
+    (lib.mkIf cfg.wallpaperPicker.enable { nixarch.packages.pacman = [ "azote" ]; })
     (lib.mkIf cfg.outputControl.enable { nixarch.packages.pacman = [ "wlr-randr" ]; })
     (lib.mkIf cfg.portal.enable { nixarch.packages.pacman = [ "xdg-desktop-portal-wlr" ]; })
 
