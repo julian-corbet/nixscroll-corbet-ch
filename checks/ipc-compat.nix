@@ -112,8 +112,30 @@ let
     "...and that command names both the script and the socket" =
       has pinnedCfg.command "scroll/scroll-swayipc-shim"
       && has pinnedCfg.command "%t/scroll-swaycompat.sock";
-    "Type=exec, so a missing interpreter fails the start instead of reporting success" =
-      pinnedUnit.Service.Type == "exec";
+    # THE REGRESSION THIS PINS. Every `Type=` weaker than `notify` releases dependants at fork or
+    # `execve()` — before the interpreter has imported asyncio, let alone bound the socket. A
+    # client that declares `After=` on this unit and starts inside that ~0.4s window connects to a
+    # path that does not exist and gets ENOENT. That is not a degraded bar, it is a silently
+    # incomplete one: ironbar builds `workspaces` ONCE per bar, logs `failed to create module
+    # Workspaces: No such file or directory`, and runs the whole session with no workspace switcher
+    # on that output while another bar, initialised a few hundred ms later, has one. Weakening this
+    # to `exec` on the theory that clients retry puts that straight back — ironbar does not retry.
+    "Type=notify, so a client's After= means the socket is BOUND, not merely exec'd" =
+      pinnedUnit.Service.Type == "notify";
+    "...and the proxy actually sends the readiness the type promises" =
+      has pinnedScript.text "sd_notify(\"READY=1\")";
+    # Split on the CALL and look for the bind in what precedes it. Matched against
+    # `asyncio.start_unix_server(` rather than the bare name on purpose: the bare name also appears
+    # in the comment above the call, which sits on the same side of the split and would satisfy a
+    # looser test no matter where the call itself had been moved to.
+    "...from AFTER start_unix_server, or the notification would out-race the socket again" =
+      let parts = lib.splitString "sd_notify(\"READY=1\")" pinnedScript.text;
+      in builtins.length parts >= 2
+      && has (builtins.head parts) "asyncio.start_unix_server(";
+    "readiness never raises — a proxy must not die because systemd could not be told" =
+      has pinnedScript.text "except OSError:";
+    "the abstract-namespace NOTIFY_SOCKET spelling is translated, not passed through" =
+      has pinnedScript.text "addr.startswith(\"@\")";
     "it is bound to graphical-session.target, where SWAYSOCK actually exists" =
       pinnedUnit.Unit.PartOf == [ "graphical-session.target" ]
       && pinnedUnit.Install.WantedBy == [ "graphical-session.target" ];

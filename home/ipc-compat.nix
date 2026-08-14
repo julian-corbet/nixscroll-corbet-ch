@@ -79,6 +79,7 @@ let
     import json
     import os
     import re
+    import socket
     import struct
     import sys
 
@@ -212,6 +213,33 @@ let
         await asyncio.gather(pump(cr, uw, False), pump(ur, cw, True))
 
 
+    def sd_notify(state: str) -> None:
+        """Tell systemd the listening socket is bound, for `Type=notify`.
+
+        THE ONLY THING THAT MAKES A CLIENT'S `After=` ON THIS UNIT MEAN ANYTHING.
+        Ordering alone does not: every weaker `Type=` releases dependants at
+        `execve()`, which is before the interpreter has imported a module, let
+        alone bound a socket. A client started in that window connects to a path
+        that does not exist yet and gets ENOENT.
+
+        Never raises: a proxy that serves its clients correctly must not die
+        because it could not talk to the service manager.
+        """
+        addr = os.environ.get("NOTIFY_SOCKET")
+        if not addr:
+            return
+        # A leading '@' is systemd's spelling of the abstract namespace, which
+        # Python spells as a leading NUL.
+        if addr.startswith("@"):
+            addr = "\0" + addr[1:]
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as s:
+                s.connect(addr)
+                s.sendall(state.encode())
+        except OSError:
+            pass
+
+
     async def main():
         upstream = os.environ.get("SCROLL_REAL_SOCK") or os.environ.get("SWAYSOCK")
         if not upstream:
@@ -223,6 +251,9 @@ let
         server = await asyncio.start_unix_server(
             lambda r, w: handle(r, w, upstream), path=listen)
         print(f"shim: {listen} -> {upstream}  (favourites {FAVOURITES})", flush=True)
+        # AFTER `start_unix_server`, never before: the whole value of the
+        # notification is that the socket is already accepting when it is sent.
+        sd_notify("READY=1")
         async with server:
             await server.serve_forever()
 
@@ -387,12 +418,20 @@ in
           After = [ "graphical-session-pre.target" ];
         };
         Service = {
-          # `exec`, not `simple`: systemd then holds dependent units until the interpreter has
-          # actually been exec'd. It still does not wait for the socket to be BOUND — a client that
-          # loses the race retries, and both known clients do — but it does rule out the case where
-          # the script is missing or the shebang does not resolve, which with `simple` would be
-          # reported as a successful start.
-          Type = "exec";
+          # `notify`, and nothing weaker will do. This unit's entire published contract is that a
+          # client may declare `Requires=`/`After=` on it and then find the socket there. `simple`
+          # releases dependants when the fork succeeds and `exec` when `execve()` does — both are
+          # BEFORE the interpreter has imported asyncio, let alone bound the socket. The proxy
+          # sends `READY=1` from `main()` immediately after `start_unix_server()` returns, so with
+          # `notify` the ordering finally means what a client reads it to mean.
+          #
+          # The window this closes is ~0.4s of interpreter startup, and losing it is not a degraded
+          # bar but a silently incomplete one: ironbar builds its `workspaces` module ONCE per bar,
+          # and a bar whose turn came up inside the window logs `failed to create module
+          # Workspaces: No such file or directory` and then runs all session with no workspace
+          # switcher at all, while a bar initialised a few hundred ms later has one. Do not weaken
+          # this to `exec` on the theory that clients retry — ironbar does not.
+          Type = "notify";
           ExecStart = cfg.command;
           Restart = "on-failure";
           RestartSec = 1;
