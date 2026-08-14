@@ -220,12 +220,12 @@ let
     in
     lines;
 
-  # ── nixdesktop layout translation ────────────────────────────────────────────────────
-  # Consumes `nixdesktop.layouts.<name>` and, to resolve identity matching, `nixdesktop.monitors`
+  # ── nixdisplay layout translation ────────────────────────────────────────────────────
+  # Consumes `nixdisplay.layouts.<name>` and, to resolve identity matching, `nixdisplay.monitors`
   # -- through `lib.probeFact`, exactly like `nixdesktopStartupProbe` below: never a flake input on
-  # nixdesktop (see flake.nix's own nixhost-input comment), so this repo keeps working for a
-  # consumer who has never heard of nixdesktop. Both tables are plain option+assertion modules with
-  # no `pkgs` argument (nixdesktop's own modules/monitors.nix and modules/layouts.nix headers say
+  # nixdisplay (see flake.nix's own nixhost-input comment), so this repo keeps working for a
+  # consumer who has never heard of nixdisplay. Both tables are plain option+assertion modules with
+  # no `pkgs` argument (nixdisplay's own modules/monitors.nix and modules/layouts.nix headers say
   # so explicitly), so whoever composes a host imports them into WHICHEVER config tree this module
   # lives in -- in practice the same home-manager profile that imports `programs.scroll` itself.
   #
@@ -234,14 +234,14 @@ let
   # one output and let a layout drive the rest.
   desktopLayoutsProbe = probeFact {
     inherit config;
-    namespace = "nixdesktop";
+    namespace = "nixdisplay";
     path = [ "layouts" ];
     fallback = { };
   };
 
   desktopMonitorsProbe = probeFact {
     inherit config;
-    namespace = "nixdesktop";
+    namespace = "nixdisplay";
     path = [ "monitors" ];
     fallback = { };
   };
@@ -416,7 +416,7 @@ let
 
   # Disabled short-circuits to JUST `disable` -- no mode/scale/position/transform line alongside
   # it. This mirrors nixniri's own `renderOutputBlock` (`if !o.enable then [ "off" ] else [...]`)
-  # exactly: two translators of one neutral vocabulary (`nixdesktop.layouts`) rendering the same
+  # exactly: two translators of one neutral vocabulary (`nixdisplay.layouts`) rendering the same
   # `enable = false` entry should not gratuitously disagree about what else gets emitted for it.
   renderLayoutOutput = name: o:
     let out = "output ${quoteName name}";
@@ -888,10 +888,10 @@ in
         default = null;
         example = "docked";
         description = ''
-          Names a `nixdesktop.layouts.<name>` to translate into this config's `output` blocks --
+          Names a `nixdisplay.layouts.<name>` to translate into this config's `output` blocks --
           read through `lib.probeFact`, the same defensive idiom `startup` below uses, and NEVER
-          a flake input on nixdesktop (see flake.nix). `null`, the default, renders nothing extra:
-          a host that never composes nixdesktop's monitor/layout tables, or that composes them
+          a flake input on nixdisplay (see flake.nix). `null`, the default, renders nothing extra:
+          a host that never composes nixdisplay's monitor/layout tables, or that composes them
           without ever setting this, gets exactly the hand-written `outputs` above and no more --
           this repo stays independently publishable.
 
@@ -899,7 +899,7 @@ in
           contribute `output` lines to the same generated section, so a host can hand-tune or add
           one output while letting the layout drive the rest.
 
-          A name that `nixdesktop.layouts` does not declare -- on this host at all, or because the
+          A name that `nixdisplay.layouts` does not declare -- on this host at all, or because the
           table it resolves to (empty or not) simply has no such entry -- FAILS THE BUILD (see the
           assertion in `config` below), rather than rendering nothing with no error: naming a
           layout is a request to arrange real monitors, and a request that silently does nothing is
@@ -1142,9 +1142,9 @@ in
           assertion = false;
           message = ''
             programs.scroll.nixdesktop.layout names "${toString cfg.nixdesktop.layout}", which does
-            not resolve to any nixdesktop.layouts entry on this host${
+            not resolve to any nixdisplay.layouts entry on this host${
               if desktopLayoutsProbe.value == { }
-              then " (nixdesktop.layouts is empty here -- nixdesktop was either never composed, or composed with no layouts declared; either way there is nothing this name can resolve to)"
+              then " (nixdisplay.layouts is empty here -- nixdisplay was either never composed, or composed with no layouts declared; either way there is nothing this name can resolve to)"
               else ". Declared: ${concatStringsSep ", " (lib.attrNames desktopLayoutsProbe.value)}"
             }. No layout output lines would otherwise be rendered, silently, with no error -- the
             hand-written `outputs` attrset would still render, giving no sign anything was missing.

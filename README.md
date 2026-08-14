@@ -302,26 +302,27 @@ rather than raw config lines. (niri's native startup syntax takes raw KDL, so ni
 same neutral list into `spawn-sh-at-startup` lines instead — each compositor module adapts the
 contract to its own syntax, which is the point of the contract being neutral.)
 
-## Wiring nixdesktop's monitors, layouts and device permission
+## Wiring nixdisplay's monitors, layouts and nixdesktop's device permission
 
-[nixdesktop](https://github.com/julian-corbet/nixdesktop-corbet-ch) also owns a fleet-wide monitor
-registry (`nixdesktop.monitors`, keyed by EDID identity — a panel roams between hosts), named
-output arrangements (`nixdesktop.layouts`), and per-session device permission
-(`nixdesktop.sessions.<name>.permittedDevices`, the complement of which is derived for niri —
-scroll needs only the allow-side). `programs.scroll.nixdesktop` consumes all three, the same
-`lib.probeFact` way `startup` above does: never a flake input on nixdesktop, silent when it isn't
-composed at all — but naming a `layout` or `session` that does not resolve to a real entry FAILS
-THE BUILD (an assertion, not a warning): a request to arrange real monitors or claim a real device
-that silently does nothing is worse than one that refuses to build.
+[nixdisplay](https://github.com/julian-corbet/nixdisplay-corbet-ch) owns a fleet-wide monitor
+registry (`nixdisplay.monitors`, keyed by EDID identity — a panel roams between hosts) and named
+output arrangements (`nixdisplay.layouts`). [nixdesktop](https://github.com/julian-corbet/nixdesktop-corbet-ch)
+owns per-session device permission (`nixdesktop.sessions.<name>.permittedDevices`, the complement
+of which is derived for niri — scroll needs only the allow-side). `programs.scroll.nixdesktop`
+consumes all three, the same `lib.probeFact` way `startup` above does: never a flake input on
+nixdisplay or nixdesktop, silent when they aren't composed at all — but naming a `layout` or
+`session` that does not resolve to a real entry FAILS THE BUILD (an assertion, not a warning): a
+request to arrange real monitors or claim a real device that silently does nothing is worse than
+one that refuses to build.
 
 ```nix
 programs.scroll.nixdesktop = {
-  layout = "docked";   # a nixdesktop.layouts.<name> — renders as `output` blocks
+  layout = "docked";   # a nixdisplay.layouts.<name> — renders as `output` blocks
   session = "primary"; # a nixdesktop.sessions.<name> — feeds permittedDrmDevices below
 };
 ```
 
-**`layout`** translates every enabled output in the named `nixdesktop.layouts.<name>` into this
+**`layout`** translates every enabled output in the named `nixdisplay.layouts.<name>` into this
 module's own `output` directives — mode/modeline, scale, position, transform, enable/disable —
 and, for an output matched by identity, one stanza per `aliases` variant (the same physical panel
 presents a different EDID per input, and scroll matches only the literal string on the wire). This

@@ -8,9 +8,9 @@
 # list) that must render no such line at all rather than a stray empty one.
 #
 # WHY THIS IS ITS OWN FILE rather than folded into checks/layout-outputs.nix (which already
-# proves the SIBLING nixdesktop.layouts/nixdesktop.monitors translation): a virtual output has no
+# proves the SIBLING nixdisplay.layouts/nixdisplay.monitors translation): a virtual output has no
 # monitor identity and no physical position — see modules/session.nix's own `virtualOutputs`
-# doc — so it shares nothing with layout-outputs.nix's fixtures (a `nixdesktop.monitors` table, an
+# doc — so it shares nothing with layout-outputs.nix's fixtures (a `nixdisplay.monitors` table, an
 # identity matcher, an overlap-adjacent position) beyond both being nixdesktop-sourced `output`
 # text. Keeping the two apart means a failure here names the concern precisely.
 #

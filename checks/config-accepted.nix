@@ -116,8 +116,8 @@ let
     };
   };
 
-  # A `nixdesktop.layouts`/`nixdesktop.monitors` stand-in -- minimal on purpose (see
-  # `checks/layout-outputs.nix`'s own header for why this repo does not import nixdesktop's real
+  # A `nixdisplay.layouts`/`nixdisplay.monitors` stand-in -- minimal on purpose (see
+  # `checks/layout-outputs.nix`'s own header for why this repo does not import nixdisplay's real
   # modules here either). Exercises every directive `renderLayoutOutput` can emit in one pass: a
   # raw modeline (the ast2500 sync-polarity case the option exists for), an identity matcher with
   # embedded spaces (quoting), an inverted transform (90 -> 270 on the wire), scale, position, a
@@ -127,12 +127,14 @@ let
   # refresh rate at all passed through unchanged, and a disabled connector-matched output emitting
   # only `disable`.
   nixdesktopFixture = { lib, ... }: {
-    options.nixdesktop = {
+    options.nixdisplay = {
       layouts = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; };
       monitors = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; };
+    };
+    options.nixdesktop = {
       sessions = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; };
     };
-    config.nixdesktop = {
+    config.nixdisplay = {
       monitors.la2306 = {
         make = "HP Inc.";
         model = "HP LA2306";
@@ -198,6 +200,8 @@ let
           }
         ];
       };
+    };
+    config.nixdesktop = {
       # Exercises the virtualOutputs -> create_output/output-mode translation (home/scroll.nix's
       # `virtualOutputLines`) through the real binary: two entries, so this also proves the
       # SECOND exec line's HEADLESS-3 addressing (not just the FALLBACK-offset HEADLESS-2 of the

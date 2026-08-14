@@ -108,7 +108,7 @@
         ipc-compat = import ./checks/ipc-compat.nix {
           pkgs = nixpkgs.legacyPackages.${system};
         };
-        # Evaluates the nixdesktop.layouts/nixdesktop.monitors/nixdesktop.sessions translation --
+        # Evaluates the nixdisplay.layouts/nixdisplay.monitors/nixdesktop.sessions translation --
         # transform inversion, identity-with-spaces quoting, alias fan-out, disabled outputs,
         # mode/modeline rendering, and the permittedDrmDevices passthrough. Nix inspecting Nix, same
         # caveat as startup-contract: it proves this module renders what it INTENDS, not that

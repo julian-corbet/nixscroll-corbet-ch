@@ -1,8 +1,8 @@
 # checks/layout-outputs.nix — evaluates home/scroll.nix for real and proves the
-# nixdesktop.layouts/nixdesktop.monitors/nixdesktop.sessions translation this repo owns: transform
+# nixdisplay.layouts/nixdisplay.monitors/nixdesktop.sessions translation this repo owns: transform
 # inversion (the single fact most likely to be silently wrong, and invisible from IPC on this exact
 # compositor — sway inverts back when reporting, see modules/layouts.nix's own `transform` option
-# upstream in nixdesktop), an identity matcher with embedded spaces round-tripping quoted, one
+# upstream in nixdisplay), an identity matcher with embedded spaces round-tripping quoted, one
 # stanza per alias variant, a disabled output rendering ONLY scroll's own `disable` directive (no
 # mode/scale/position/transform alongside it — matching nixniri's own `renderOutputBlock` short
 # circuit), an unresolvable `layout`/`session` name FAILING THE BUILD rather than rendering nothing
@@ -15,7 +15,7 @@
 # arithmetic that fails silently rather than loudly (a matcher that matches nothing is not an
 # error on either compositor, see modules/monitors.nix upstream).
 #
-# The stub below composes a MINIMAL stand-in for `nixdesktop.layouts`/`nixdesktop.monitors`/
+# The stub below composes a MINIMAL stand-in for `nixdisplay.layouts`/`nixdisplay.monitors`/
 # `nixdesktop.sessions` and for `nixgpu.stableDevicePaths.devices`, not either sibling repo's own
 # real modules — pulling either in as a path dependency would give this repo an undeclared coupling
 # to a sibling repo's internals, which is precisely what `lib.probeFact` exists to avoid. Each
@@ -44,13 +44,13 @@ let
   # (`programs.scroll.nixdesktop.layout = "desk"`), so every fixture below is a single self
   # contained module rather than three things a caller must remember to wire together.
   withLayout = outputs: monitors: { lib, ... }: {
-    options.nixdesktop = {
+    options.nixdisplay = {
       layouts = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; };
       monitors = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; };
     };
     config = {
-      nixdesktop.layouts.desk = { description = "fixture"; inherit outputs; };
-      nixdesktop.monitors = monitors;
+      nixdisplay.layouts.desk = { description = "fixture"; inherit outputs; };
+      nixdisplay.monitors = monitors;
       programs.scroll.nixdesktop.layout = "desk";
     };
   };
@@ -304,12 +304,12 @@ let
         ])
         "position 1920 0";
 
-    # ── NO nixdesktop AT ALL: renders nothing extra, never an error ─────────────────────────
-    "with no nixdesktop composed and no layout named, this module still evaluates and renders nothing extra" =
+    # ── NO nixdisplay AT ALL: renders nothing extra, never an error ─────────────────────────
+    "with no nixdisplay composed and no layout named, this module still evaluates and renders nothing extra" =
       let cfg = render [ ]; in
       !(has cfg "output \"Dell") && !(has cfg "output \"DP-1\"") && lib.stringLength cfg > 100;
 
-    # A monitor slug the probed table does not contain renders NO stanza, silently — nixdesktop's
+    # A monitor slug the probed table does not contain renders NO stanza, silently — nixdisplay's
     # own modules/layouts.nix already hard-asserts this cannot happen in a properly composed tree;
     # reaching here with a dangling slug can only mean the two tables were composed apart, which
     # is this module's WARNING to raise (proven by the two cases below), not an assertion to
@@ -318,31 +318,31 @@ let
       let cfg = render [ (withLayout [ base ] { }) ]; in
       lib.isString cfg && !(has cfg "output \"Dell");
 
-    # ── FACT-WIRING: the warnings this module raises when nixdesktop is only PARTLY composed ──
+    # ── FACT-WIRING: the warnings this module raises when nixdisplay/nixdesktop is only PARTLY composed ──
     #
     # Both checks below filter for THIS module's OWN synthesized message by substring rather than
     # comparing the whole `warnings` list, deliberately: `lib.probeFact`'s "composed" test is
-    # `config ? nixdesktop` alone (see home/scroll.nix's own comment on this, verified directly
-    # against nixhost's `lib/facts.nix`), so a fixture composing only PART of nixdesktop's option
-    # surface (as every fixture in this file necessarily does -- none imports nixdesktop's real
+    # `config ? <namespace>` alone (see home/scroll.nix's own comment on this, verified directly
+    # against nixhost's `lib/facts.nix`), so a fixture composing only PART of nixdisplay's option
+    # surface (as every fixture in this file necessarily does -- none imports nixdisplay's real
     # modules, see this file's header) can legitimately carry OTHER, unrelated "unresolved"
     # warnings of its own. A whole-list equality here would make this check fail on a property of
     # the shared probing mechanism that has nothing to do with the behaviour under test.
     #
     # This is a DIFFERENT failure than the "SILENT NO-OP" group below: here the TABLE itself moved
-    # (`nixdesktop.layouts`/`nixdesktop.sessions` renamed to something else), which is exactly what
+    # (`nixdisplay.layouts`/`nixdesktop.sessions` renamed to something else), which is exactly what
     # `probeFact`'s own "unresolved" state exists to catch and is still reported as a `warning` (not
     # an assertion, matching every other probeFact rename-warning in this module); below, the TABLE
     # is reachable but the NAME given does not appear in it, which is this module's own, stricter
     # check.
-    "nixdesktop.layouts composed but renamed still warns (the TABLE moved, not the name)" =
+    "nixdisplay.layouts composed but renamed still warns (the TABLE moved, not the name)" =
       let
         w = (evalScroll [
-          { options.nixdesktop.autolayouts = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; }; }
-          { config.nixdesktop.autolayouts.desk = { description = "fixture"; outputs = [ ]; }; }
+          { options.nixdisplay.autolayouts = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; }; }
+          { config.nixdisplay.autolayouts.desk = { description = "fixture"; outputs = [ ]; }; }
           { config.programs.scroll.nixdesktop.layout = "desk"; }
         ]).warnings;
-        ours = lib.filter (m: has m "nixdesktop.layouts") w;
+        ours = lib.filter (m: has m "nixdisplay.layouts") w;
       in
       lib.length ours == 1;
 
@@ -361,14 +361,14 @@ let
     #
     # Naming a layout or session that does not resolve used to render NOTHING with no warning and
     # no assertion whenever the probed table was EMPTY -- which is exactly the state a host with
-    # nixdesktop not composed at all is in. These now fail the build (an `assertions` entry with
+    # nixdisplay not composed at all is in. These now fail the build (an `assertions` entry with
     # `assertion = false`), unconditionally on whether the table is empty or populated, because
     # both are "this name does not resolve" from the caller's point of view.
     "naming a layout absent from a declared (non-empty) table fails the build, naming the declared ones" =
       let
         a = (evalScroll [
-          { options.nixdesktop.layouts = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; }; }
-          { config.nixdesktop.layouts.desk = { description = "fixture"; outputs = [ ]; }; }
+          { options.nixdisplay.layouts = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; }; }
+          { config.nixdisplay.layouts.desk = { description = "fixture"; outputs = [ ]; }; }
           { config.programs.scroll.nixdesktop.layout = "typo-desk"; }
         ]).assertions;
         ours = lib.filter (x: has x.message "programs.scroll.nixdesktop.layout") a;
@@ -378,19 +378,19 @@ let
     "naming NO layout at all (null, the default) raises no failing assertion of our own" =
       let
         a = (evalScroll [
-          { options.nixdesktop.layouts = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; }; }
-          { config.nixdesktop.layouts.desk = { description = "fixture"; outputs = [ ]; }; }
+          { options.nixdisplay.layouts = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; }; }
+          { config.nixdisplay.layouts.desk = { description = "fixture"; outputs = [ ]; }; }
         ]).assertions;
       in
       lib.filter (x: has x.message "programs.scroll.nixdesktop.layout") a == [ ];
 
-    # THE CASE THAT USED TO BUILD CLEAN WITH ZERO OUTPUT LINES: nixdesktop not composed AT ALL (no
-    # `nixdesktop.layouts` option even declared anywhere -- the real "absent" probeFact state, not
+    # THE CASE THAT USED TO BUILD CLEAN WITH ZERO OUTPUT LINES: nixdisplay not composed AT ALL (no
+    # `nixdisplay.layouts` option even declared anywhere -- the real "absent" probeFact state, not
     # merely "empty") and a layout named anyway. Before this fix: `warnings == [ ]`, every
     # assertion true, `xdg.configFile."scroll/config".text` renders no layout-driven `output` line
     # -- a completely wrong config that built without a single diagnostic. Composes NOTHING under
-    # `nixdesktop` except the option `programs.scroll.nixdesktop.layout` itself declares.
-    "naming a layout with nixdesktop not composed at all fails the build, not silently" =
+    # `nixdisplay` except the option `programs.scroll.nixdesktop.layout` itself declares.
+    "naming a layout with nixdisplay not composed at all fails the build, not silently" =
       let
         a = (evalScroll [ { config.programs.scroll.nixdesktop.layout = "docked"; } ]).assertions;
         ours = lib.filter (x: has x.message "programs.scroll.nixdesktop.layout") a;
