@@ -11,8 +11,8 @@
 # proves the SIBLING nixdisplay.layouts/nixdisplay.monitors translation): a virtual output has no
 # monitor identity and no physical position — see modules/session.nix's own `virtualOutputs`
 # doc — so it shares nothing with layout-outputs.nix's fixtures (a `nixdisplay.monitors` table, an
-# identity matcher, an overlap-adjacent position) beyond both being nixdesktop-sourced `output`
-# text. Keeping the two apart means a failure here names the concern precisely.
+# identity matcher, an overlap-adjacent position) beyond both ultimately rendering output-related
+# commands. Keeping the two apart means a failure here names the concern precisely.
 #
 # WHY THE REAL SOURCE-READING IN home/scroll.nix'S OWN COMMENT MATTERS TO THIS FILE: the
 # HEADLESS-<N+1> offset is not a convention this repo invented, it is a measured fact about
@@ -55,7 +55,7 @@ let
 
   has = haystack: needle: lib.hasInfix needle haystack;
 
-  oneOutput = render [ (withSession { virtualOutputs = [ { width = 1920; height = 1080; } ]; }) ];
+  oneOutput = render [ (withSession { virtualOutputs = [{ width = 1920; height = 1080; }]; }) ];
   twoOutputs = render [
     (withSession {
       virtualOutputs = [
@@ -117,13 +117,14 @@ let
   failed = lib.attrNames (lib.filterAttrs (_: passed: !passed) results);
 in
 # `pkgs.emptyFile`, not `pkgs.runCommand "..." {} "touch $out"` — same reasoning as
-# checks/layout-outputs.nix and checks/startup-contract.nix: this check decides everything at
-# evaluation time, and a system-dependent marker becomes a real foreign-arch build under
-# `nix flake check --all-systems`.
+  # checks/layout-outputs.nix and checks/startup-contract.nix: this check decides everything at
+  # evaluation time, and a system-dependent marker becomes a real foreign-arch build under
+  # `nix flake check --all-systems`.
 if failed == [ ]
 then pkgs.emptyFile
-else throw ''
-  nixscroll: the nixdesktop.sessions.<name>.virtualOutputs -> create_output translation is wrong.
-  Failing assertions:
-  ${lib.concatMapStringsSep "\n" (f: "  - ${f}") failed}
-''
+else
+  throw ''
+    nixscroll: the nixdesktop.sessions.<name>.virtualOutputs -> create_output translation is wrong.
+    Failing assertions:
+    ${lib.concatMapStringsSep "\n" (f: "  - ${f}") failed}
+  ''

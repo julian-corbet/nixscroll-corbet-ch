@@ -55,6 +55,37 @@ let
     };
   };
 
+  # Deliberate legacy decoy: the extracted layout/monitor tables used to live below
+  # `nixdesktop`. Keeping this fixture separate from `withLayout` proves that old namespace alone
+  # cannot accidentally satisfy the new cross-repo probe (there is intentionally no compatibility
+  # fallback).
+  withLegacyLayout = outputs: monitors: { lib, ... }: {
+    options.nixdesktop = {
+      layouts = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; };
+      monitors = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; };
+    };
+    config = {
+      nixdesktop.layouts.desk = { description = "legacy fixture"; inherit outputs; };
+      nixdesktop.monitors = monitors;
+      programs.scroll.nixdesktop.layout = "desk";
+    };
+  };
+
+  # Mixed-namespace decoy: the layout is in its current home, so resolution reaches identity
+  # matching, but the monitor table exists only in its legacy home. This independently proves the
+  # monitor probe has no legacy fallback instead of short-circuiting on an unresolved layout first.
+  withLegacyMonitors = outputs: monitors: { lib, ... }: {
+    options.nixdisplay.layouts =
+      lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; };
+    options.nixdesktop.monitors =
+      lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; };
+    config = {
+      nixdisplay.layouts.desk = { description = "current layout with legacy monitors"; inherit outputs; };
+      nixdesktop.monitors = monitors;
+      programs.scroll.nixdesktop.layout = "desk";
+    };
+  };
+
   evalScroll = extra: (lib.evalModules {
     modules = [ stubs scrollModule { programs.scroll.enable = true; } ] ++ extra;
     specialArgs = { inherit pkgs; };
@@ -66,7 +97,7 @@ let
 
   # The estate's real Dell, exactly as modules/monitors.nix's own fixtures spell it, WITH the
   # `identifier`/`aliases` fields already resolved — this stub stands in for the derived output
-  # of nixdesktop's own module, not for its input.
+  # of nixdisplay's own module, not for its input.
   dell = {
     make = "Dell Inc.";
     model = "DELL U4323QE";
@@ -97,6 +128,10 @@ let
   identityCfg = render [ (withLayout [ base ] { dell = dell; }) ];
   aliasCfg = render [ (withLayout [ base ] { dell = dellWithAlias; }) ];
   disabledCfg = render [ (withLayout [ (base // { enable = false; }) ] { dell = dell; }) ];
+  legacyNamespaceEval = evalScroll [ (withLegacyLayout [ base ] { dell = dell; }) ];
+  legacyNamespaceCfg = legacyNamespaceEval.xdg.configFile."scroll/config".text;
+  legacyMonitorsEval = evalScroll [ (withLegacyMonitors [ base ] { dell = dell; }) ];
+  legacyMonitorsCfg = legacyMonitorsEval.xdg.configFile."scroll/config".text;
 
   # Every non-transform field ALSO set on the disabled entry, so "a disabled output renders only
   # `disable`" is proven against a fixture that would otherwise have something to leak, not one
@@ -104,7 +139,8 @@ let
   # same check by coincidence.
   richDisabledCfg = render [
     (withLayout
-      [ (base // {
+      [
+        (base // {
           enable = false;
           mode = "1920x1080@60";
           scale = 1.5;
@@ -190,7 +226,7 @@ let
 
   results = {
     # ── TRANSFORM INVERSION, every value the type admits ─────────────────────────────────────
-    # scroll/sway is CLOCKWISE, nixdesktop's neutral vocabulary is COUNTER-CLOCKWISE — see
+    # scroll/sway is CLOCKWISE, nixdisplay's neutral vocabulary is COUNTER-CLOCKWISE — see
     # `invertTransform`'s own comment in home/scroll.nix. Each pair below proves both that the
     # correct value appears AND that the wrong (un-inverted) one does not, since a transform check
     # that only greps for the right string would pass just as happily if BOTH were emitted.
@@ -253,7 +289,8 @@ let
       has
         (render [
           (withLayout
-            [ (base // {
+            [
+              (base // {
                 modeline = "148.50 1920 2008 2052 2200 1080 1084 1089 1125 +hsync +vsync";
               })
             ]
@@ -278,7 +315,8 @@ let
       !(has
         (render [
           (withLayout
-            [ (base // {
+            [
+              (base // {
                 mode = "1920x1080@60";
                 modeline = "148.50 1920 2008 2052 2200 1080 1084 1089 1125 +hsync +vsync";
               })
@@ -308,6 +346,25 @@ let
     "with no nixdisplay composed and no layout named, this module still evaluates and renders nothing extra" =
       let cfg = render [ ]; in
       !(has cfg "output \"Dell") && !(has cfg "output \"DP-1\"") && lib.stringLength cfg > 100;
+
+    "nixdisplay resolves layouts while legacy nixdesktop layouts and monitors alone do not" =
+      let
+        ours = lib.filter
+          (x: has x.message "programs.scroll.nixdesktop.layout")
+          legacyNamespaceEval.assertions;
+      in
+      has identityCfg ''output "Dell Inc. DELL U4323QE 9BQR2P3"''
+      && !(has legacyNamespaceCfg ''output "Dell Inc. DELL U4323QE 9BQR2P3"'')
+      && lib.length ours == 1
+      && !(lib.head ours).assertion;
+
+    "nixdisplay layout with only legacy nixdesktop monitors renders no identity stanza and warns" =
+      let
+        ours = lib.filter (m: has m "nixdisplay.monitors") legacyMonitorsEval.warnings;
+      in
+      has identityCfg ''output "Dell Inc. DELL U4323QE 9BQR2P3"''
+      && !(has legacyMonitorsCfg ''output "Dell Inc. DELL U4323QE 9BQR2P3"'')
+      && lib.length ours == 1;
 
     # A monitor slug the probed table does not contain renders NO stanza, silently — nixdisplay's
     # own modules/layouts.nix already hard-asserts this cannot happen in a properly composed tree;
@@ -392,7 +449,7 @@ let
     # `nixdisplay` except the option `programs.scroll.nixdesktop.layout` itself declares.
     "naming a layout with nixdisplay not composed at all fails the build, not silently" =
       let
-        a = (evalScroll [ { config.programs.scroll.nixdesktop.layout = "docked"; } ]).assertions;
+        a = (evalScroll [{ config.programs.scroll.nixdesktop.layout = "docked"; }]).assertions;
         ours = lib.filter (x: has x.message "programs.scroll.nixdesktop.layout") a;
       in
       lib.length ours == 1 && !(lib.head ours).assertion;
@@ -419,7 +476,7 @@ let
 
     "naming a session with nixdesktop not composed at all fails the build, not silently" =
       let
-        a = (evalScroll [ { config.programs.scroll.nixdesktop.session = "primary"; } ]).assertions;
+        a = (evalScroll [{ config.programs.scroll.nixdesktop.session = "primary"; }]).assertions;
         ours = lib.filter (x: has x.message "programs.scroll.nixdesktop.session") a;
       in
       lib.length ours == 1 && !(lib.head ours).assertion;
@@ -462,11 +519,12 @@ let
   failed = lib.attrNames (lib.filterAttrs (_: passed: !passed) results);
 in
 # `pkgs.emptyFile`, not `pkgs.runCommand "..." {} "touch $out"` — see `checks/startup-contract.nix`
-# for the full reasoning: this check decides everything at evaluation time, and a system-dependent
-# marker becomes a real foreign-arch build under `nix flake check --all-systems`.
+  # for the full reasoning: this check decides everything at evaluation time, and a system-dependent
+  # marker becomes a real foreign-arch build under `nix flake check --all-systems`.
 if failed == [ ]
 then pkgs.emptyFile
-else throw ''
-  nixscroll: the nixdesktop layout/monitor/session translation is wrong. Failing assertions:
-  ${lib.concatMapStringsSep "\n" (f: "  - ${f}") failed}
-''
+else
+  throw ''
+    nixscroll: the nixdisplay layout/monitor + nixdesktop session translation is wrong. Failing assertions:
+    ${lib.concatMapStringsSep "\n" (f: "  - ${f}") failed}
+  ''

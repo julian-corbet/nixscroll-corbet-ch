@@ -331,7 +331,7 @@ hand-tune one output and let the layout drive the rest.
 
 Two measured facts this translation exists to get right, both silent failures if missed:
 
-- **Rotation direction.** nixdesktop's `transform` vocabulary is counter-clockwise, matching
+- **Rotation direction.** nixdisplay's `transform` vocabulary is counter-clockwise, matching
   `wl_output` itself. scroll (a sway fork) calls `invert_rotation_direction()` on every parse, so
   a bare pass-through would rotate a monitor 180° from what was asked for — and `swaymsg`/`scrollmsg`
   report the config's own spelling back, so the bug is invisible from IPC. This module inverts
@@ -339,10 +339,10 @@ Two measured facts this translation exists to get right, both silent failures if
   helper, so the swap can't be duplicated wrongly a second time.
 - **A plain `mode` needs a literal `Hz` suffix — and it is plain `mode`, never `mode --custom`.**
   Verified against the real binary: `mode 1920x1080@60` is rejected, `mode 1920x1080@60Hz` is
-  accepted, and `mode 1920x1080` (no rate at all) is accepted unchanged. nixdesktop's neutral `mode`
+  accepted, and `mode 1920x1080` (no rate at all) is accepted unchanged. nixdisplay's neutral `mode`
   string carries no Hz requirement, so this module normalises it. `--custom` was tried first and is
   wrong: it names an unlisted/custom *modeline*, not "a mode typed by hand", and scroll accepts a
-  plain "WIDTHxHEIGHT[@RATE]" mode without it. A raw `modeline` (the option nixdesktop's own layout
+  plain "WIDTHxHEIGHT[@RATE]" mode without it. A raw `modeline` (the option nixdisplay's own layout
   module carries specifically for panels — an ASPEED ast2500 BMC framebuffer in this estate's case —
   that only accept one sync polarity, which no named mode can express) is scroll's actual
   custom-mode path, and is passed through to scroll's own `modeline` directive verbatim.

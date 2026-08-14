@@ -98,14 +98,15 @@ let
       startup = [ "mako" "waybar" ];
       xwayland = "enable";
 
-      # Exercises the nixdesktop-layout translation (home/scroll.nix's `renderLayoutOutput`)
-      # through the SAME real-binary gate as every hand-written option above -- see
-      # `nixdesktopFixture` below for the table this names.
+      # Exercises the nixdisplay layout translation selected through the public
+      # `programs.scroll.nixdesktop.layout` API (home/scroll.nix's `renderLayoutOutput`) through
+      # the SAME real-binary gate as every hand-written option above -- see
+      # `displayAndDesktopFixture` below for the table this names.
       nixdesktop.layout = "desk";
 
       # Exercises the nixdesktop.sessions.<name>.virtualOutputs -> create_output/output-mode
       # translation (home/scroll.nix's `virtualOutputLines`) through the SAME real-binary gate --
-      # see `nixdesktopFixture` below for the session this names. `checks/virtual-outputs.nix`
+      # see `displayAndDesktopFixture` below for the session this names. `checks/virtual-outputs.nix`
       # already proves this module renders what it INTENDS (the exact HEADLESS-<N+1> text); this
       # is the one check that asks scroll's own parser whether the generated `exec` LINE ITSELF
       # is valid config syntax -- the `exec` directive's payload is opaque to `--validate` (it
@@ -126,7 +127,7 @@ let
   # directive here, see home/scroll.nix's own `normaliseModeRate` comment), a bare mode with no
   # refresh rate at all passed through unchanged, and a disabled connector-matched output emitting
   # only `disable`.
-  nixdesktopFixture = { lib, ... }: {
+  displayAndDesktopFixture = { lib, ... }: {
     options.nixdisplay = {
       layouts = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; };
       monitors = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; };
@@ -227,7 +228,7 @@ let
   # checks/startup-contract.nix's own header for why this file never reaches for the raw
   # `../home/scroll.nix` path itself either.
   rendered = (lib.evalModules {
-    modules = [ scrollModule hmStub nixdesktopFixture { _module.args.pkgs = pkgs; } fixture ];
+    modules = [ scrollModule hmStub displayAndDesktopFixture { _module.args.pkgs = pkgs; } fixture ];
   }).config.xdg.configFile."scroll/config".text;
 
   configFile = pkgs.writeText "scroll-fixture.config" rendered;

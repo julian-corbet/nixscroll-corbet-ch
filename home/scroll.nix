@@ -232,14 +232,14 @@ let
   # This is additive to, not a replacement for, the hand-written `outputs` escape hatch above: both
   # contribute lines to the same generated section (`outputLines` below), so a host can hand-write
   # one output and let a layout drive the rest.
-  desktopLayoutsProbe = probeFact {
+  displayLayoutsProbe = probeFact {
     inherit config;
     namespace = "nixdisplay";
     path = [ "layouts" ];
     fallback = { };
   };
 
-  desktopMonitorsProbe = probeFact {
+  displayMonitorsProbe = probeFact {
     inherit config;
     namespace = "nixdisplay";
     path = [ "monitors" ];
@@ -269,9 +269,9 @@ let
     fallback = { };
   };
 
-  resolvedDesktopLayout =
+  resolvedDisplayLayout =
     if cfg.nixdesktop.layout == null then null
-    else desktopLayoutsProbe.value.${cfg.nixdesktop.layout} or null;
+    else displayLayoutsProbe.value.${cfg.nixdesktop.layout} or null;
 
   resolvedDesktopSession =
     if cfg.nixdesktop.session == null then null
@@ -327,11 +327,12 @@ let
   # probe in this file already applies to a table that might not carry the leaf it wants yet.
   virtualOutputLines =
     if resolvedDesktopSession == null then [ ]
-    else lib.imap1
-      (i: o:
-        let headlessName = "HEADLESS-${toString (i + 1)}"; in
-        "exec ${scrollmsgBin} 'create_output; output ${quoteName headlessName} mode ${toString o.width}x${toString o.height}'")
-      (resolvedDesktopSession.virtualOutputs or [ ]);
+    else
+      lib.imap1
+        (i: o:
+          let headlessName = "HEADLESS-${toString (i + 1)}"; in
+          "exec ${scrollmsgBin} 'create_output; output ${quoteName headlessName} mode ${toString o.width}x${toString o.height}'")
+        (resolvedDesktopSession.virtualOutputs or [ ]);
 
   # A permitted device NAME that resolves in the probed inventory becomes its `cardPath` --
   # `/dev/dri/by-path/pci-<addr>-card` or `/dev/dri/by-path/platform-<addr>-card`, both stable at
@@ -356,8 +357,8 @@ let
       if attempt.success then attempt.value else null;
 
   # scroll/sway's rotation is CLOCKWISE -- sway calls invert_rotation_direction() on every parse --
-  # while nixdesktop's neutral vocabulary is COUNTER-CLOCKWISE, matching wl_output itself (see
-  # nixdesktop's modules/layouts.nix `transform` option for the full measured detail). ONE named
+  # while nixdisplay's neutral vocabulary is COUNTER-CLOCKWISE, matching wl_output itself (see
+  # nixdisplay's modules/layouts.nix `transform` option for the full measured detail). ONE named
   # helper, so the swap is stated exactly once and cannot be duplicated wrongly a second time
   # anywhere else in this repo. 90 and 270 (flipped or not) swap; normal/180/flipped/flipped-180
   # are each their own inverse and pass straight through untouched.
@@ -376,7 +377,7 @@ let
   # against the real binary (same doctrine as `checks/config-accepted.nix`): `mode 1920x1080@60`
   # is rejected ("Invalid mode refresh rate"), `mode 1920x1080@60Hz` is accepted, case of the
   # suffix does not matter. A bare width x height with no `@rate` at all is also accepted,
-  # unchanged. nixdesktop's neutral `mode` string carries no Hz requirement -- its own regex is
+  # unchanged. nixdisplay's neutral `mode` string carries no Hz requirement -- its own regex is
   # `@.*`, deliberately unconstrained, see modules/layouts.nix -- so the suffix is normalised here
   # rather than assumed present.
   #
@@ -401,9 +402,9 @@ let
   # exactly one name. `match = "identity"` is the monitor's own `identifier` PLUS every alias's --
   # the same physical panel presents a DIFFERENT EDID per input (a KVM, a dock's other port), a
   # compositor matches only the exact string on the wire, and both must therefore get their own
-  # stanza with identical settings (see nixdesktop's modules/monitors.nix header on `aliases`).
+  # stanza with identical settings (see nixdisplay's modules/monitors.nix header on `aliases`).
   #
-  # A monitor slug absent from the probed table renders NO stanza at all, silently: nixdesktop's
+  # A monitor slug absent from the probed table renders NO stanza at all, silently: nixdisplay's
   # own modules/layouts.nix already hard-asserts that every referenced slug exists in the SAME
   # composed tree, so reaching this module with a dangling slug can only mean the two tables were
   # composed apart from each other -- not this module's assertion to make (see the warning in
@@ -411,7 +412,7 @@ let
   matcherNamesOf = o:
     if o.match == "connector" then [ o.connector ]
     else
-      let mon = desktopMonitorsProbe.value.${o.monitor} or null;
+      let mon = displayMonitorsProbe.value.${o.monitor} or null;
       in if mon == null then [ ] else [ mon.identifier ] ++ map (a: a.identifier) mon.aliases;
 
   # Disabled short-circuits to JUST `disable` -- no mode/scale/position/transform line alongside
@@ -422,19 +423,21 @@ let
     let out = "output ${quoteName name}";
     in
     if !o.enable then [ "${out} disable" ]
-    else filter (x: x != null) [
-      (optionalIf (o.modeline != null) "${out} modeline ${o.modeline}")
-      (optionalIf (o.modeline == null && o.mode != null) "${out} mode ${normaliseModeRate o.mode}")
-      (optionalIf (o.scale != null) "${out} scale ${toString o.scale}")
-      (optionalIf (o.position != null) "${out} position ${toString o.position.x} ${toString o.position.y}")
-      "${out} transform ${invertTransform o.transform}"
-    ];
+    else
+      filter (x: x != null) [
+        (optionalIf (o.modeline != null) "${out} modeline ${o.modeline}")
+        (optionalIf (o.modeline == null && o.mode != null) "${out} mode ${normaliseModeRate o.mode}")
+        (optionalIf (o.scale != null) "${out} scale ${toString o.scale}")
+        (optionalIf (o.position != null) "${out} position ${toString o.position.x} ${toString o.position.y}")
+        "${out} transform ${invertTransform o.transform}"
+      ];
 
   layoutOutputLines =
-    if resolvedDesktopLayout == null then [ ]
-    else lib.concatLists (map
-      (o: lib.concatLists (map (n: renderLayoutOutput n o) (matcherNamesOf o)))
-      resolvedDesktopLayout.outputs);
+    if resolvedDisplayLayout == null then [ ]
+    else
+      lib.concatLists (map
+        (o: lib.concatLists (map (n: renderLayoutOutput n o) (matcherNamesOf o)))
+        resolvedDisplayLayout.outputs);
 
   outputLines = lib.concatLists (map (name: renderOutput name cfg.outputs.${name}) (lib.attrNames cfg.outputs))
     ++ layoutOutputLines;
@@ -1124,10 +1127,11 @@ in
           '';
         }
       ]
-      # THE SILENT NO-OP: `nixdesktop.layout` naming something that does not resolve used to
-      # render NOTHING -- no warning, no assertion -- whenever `desktopLayoutsProbe.value` was
-      # empty, which is exactly the state a host with nixdesktop absent entirely is in. Forceable:
-      # nixdesktop not composed at all + `layout = "docked"` used to eval clean, `warnings == [ ]`,
+      # THE SILENT NO-OP: `programs.scroll.nixdesktop.layout` naming something that does not
+      # resolve used to render NOTHING -- no warning, no assertion -- whenever
+      # `displayLayoutsProbe.value` was empty, which is exactly the state a host with nixdisplay
+      # absent entirely is in. Forceable: nixdisplay not composed at all + `layout = "docked"`
+      # used to eval clean, `warnings == [ ]`,
       # every assertion true, zero layout output lines. Naming a layout is a request to arrange
       # real monitors; a request that silently does nothing is worse than one that refuses to
       # build, so this fires regardless of whether the probed table is empty or populated --
@@ -1137,15 +1141,15 @@ in
       # this list, not merely an always-true entry, or "naming no layout raises no assertion of
       # our own" could never observe an empty list.
       ++ lib.optional
-        (cfg.nixdesktop.layout != null && !(desktopLayoutsProbe.value ? ${cfg.nixdesktop.layout}))
+        (cfg.nixdesktop.layout != null && !(displayLayoutsProbe.value ? ${cfg.nixdesktop.layout}))
         {
           assertion = false;
           message = ''
             programs.scroll.nixdesktop.layout names "${toString cfg.nixdesktop.layout}", which does
             not resolve to any nixdisplay.layouts entry on this host${
-              if desktopLayoutsProbe.value == { }
+              if displayLayoutsProbe.value == { }
               then " (nixdisplay.layouts is empty here -- nixdisplay was either never composed, or composed with no layouts declared; either way there is nothing this name can resolve to)"
-              else ". Declared: ${concatStringsSep ", " (lib.attrNames desktopLayoutsProbe.value)}"
+              else ". Declared: ${concatStringsSep ", " (lib.attrNames displayLayoutsProbe.value)}"
             }. No layout output lines would otherwise be rendered, silently, with no error -- the
             hand-written `outputs` attrset would still render, giving no sign anything was missing.
           '';
@@ -1160,21 +1164,15 @@ in
       # the assertions above -- THIS NAME is absent from an otherwise-reachable table) are gated
       # behind the option that actually asks for them, and this is not a style choice -- it works
       # around a MEASURED false positive in `lib.probeFact` itself when several independent leaves
-      # share one namespace attribute. `probeFact`'s "composed" test is `config ? nixdesktop` alone
-      # (the namespace's first segment only, see nixhost's lib/facts.nix), so a host composing
-      # ONLY `nixdesktop.startup` -- the one real-world case this repo has today -- already makes
-      # `config ? nixdesktop` true and every OTHER leaf (`monitors`, `sessions`, and `layouts` when
-      # `layout` is unset) reports "unresolved" (a spurious rename warning) purely because
-      # something else under the shared name exists, not because anything moved. Verified directly
-      # against nixhost's own `lib/facts.nix`: composing a fixture with `nixdesktop.startup` alone
-      # and nothing else yields `state = "unresolved"` for both a `monitors` and a `sessions`
-      # probe. Gating each probe's warnings behind the option that consumes it (`layout`/`session`,
-      # both `null` by default) means a host that never touches this repo's nixdesktop-consuming
-      # options sees no noise from it, regardless of which other nixdesktop leaves happen to be
-      # composed alongside `programs.scroll` -- exactly the "defaults to rendering nothing"
-      # contract `layout`/`session` themselves promise.
+      # share one namespace attribute. `probeFact`'s "composed" test is the namespace's first
+      # segment only (see nixhost's lib/facts.nix), so a host composing just ONE nixdisplay table
+      # makes a missing sibling table look "unresolved", and composing only `nixdesktop.startup`
+      # does the same for the sibling `nixdesktop.sessions` probe. Gating each probe's warnings
+      # behind the option that consumes it (`layout`/`session`, both `null` by default) means a host
+      # that never asks for either integration sees no noise from partially composed sibling
+      # namespaces -- exactly the "defaults to rendering nothing" contract the options promise.
       warnings = nixdesktopStartupProbe.warnings
-        ++ optionals (cfg.nixdesktop.layout != null) (desktopLayoutsProbe.warnings ++ desktopMonitorsProbe.warnings)
+        ++ optionals (cfg.nixdesktop.layout != null) (displayLayoutsProbe.warnings ++ displayMonitorsProbe.warnings)
         ++ optionals (cfg.nixdesktop.session != null) desktopSessionsProbe.warnings;
 
       xdg.configFile."scroll/config".text = renderedConfig;
