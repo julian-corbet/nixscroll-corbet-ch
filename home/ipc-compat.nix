@@ -76,6 +76,7 @@ let
     and why lives in that module (home/ipc-compat.nix).
     """
     import asyncio
+    import glob
     import json
     import os
     import re
@@ -204,12 +205,78 @@ let
                 pass
 
 
-    async def handle(cr, cw, upstream):
-        try:
-            ur, uw = await asyncio.open_unix_connection(upstream)
-        except OSError:
+    def upstream_candidates(listen):
+        """Upstream socket paths to try for a new client connection, in order.
+
+        Resolved per CONNECTION, never once at startup, and the difference is
+        the whole point. This process lives as long as the SESSION (PartOf=
+        graphical-session.target), but the compositor's socket path embeds the
+        compositor's PID — scroll can crash and come back many times inside one
+        session, and a path captured at startup then names a socket whose owner
+        is gone. What that looked like in practice: the proxy ran for days,
+        answered every client connect with an immediate close, and every bar
+        started after the first compositor restart ran with no workspace
+        switcher at all — nothing failed, nothing logged.
+
+        The environment values lead because they are the configured contract;
+        the glob over the compositor's socket pattern is what makes a restart
+        survivable. Three deliberate boundaries on it:
+
+          · Only inside $XDG_RUNTIME_DIR, never the /tmp fallback the LISTEN
+            path is allowed. Binding our own socket in /tmp is harmless;
+            DISCOVERING an upstream there would hand every client to whoever
+            planted a matching socket in a world-writable directory. No
+            runtime dir, no glob.
+
+          · Never `listen`, this proxy's own socket — in the environment or
+            the glob. socketName is free-form, and a name matching the
+            pattern would otherwise let the proxy dial itself once the real
+            candidates are gone, each accepted connection opening the next
+            until the fd limit.
+
+          · connect(2) decides liveness — a stale socket FILE outlives its
+            compositor, refuses, and falls through to the next candidate.
+            Liveness is not identity, though: newest mtime first makes the
+            current instance beat the leftovers, but a deliberately NESTED
+            compositor in the same runtime dir can still capture the glob.
+            That is why the environment stays first, and why a nested setup
+            should say what it means with SCROLL_REAL_SOCK.
+        """
+        out = []
+        for var in ("SCROLL_REAL_SOCK", "SWAYSOCK"):
+            path = os.environ.get(var)
+            if path and path != listen and path not in out:
+                out.append(path)
+
+        def mtime(path):
+            try:
+                return os.path.getmtime(path)
+            except OSError:
+                return 0.0
+
+        run = os.environ.get("XDG_RUNTIME_DIR")
+        found = glob.glob(os.path.join(run, "scroll-ipc.*.sock")) if run else []
+        for path in sorted(found, key=mtime, reverse=True):
+            if path != listen and path not in out:
+                out.append(path)
+        return out
+
+
+    async def connect_upstream(listen):
+        for path in upstream_candidates(listen):
+            try:
+                return await asyncio.open_unix_connection(path)
+            except OSError:
+                continue
+        return None
+
+
+    async def handle(cr, cw, listen):
+        pair = await connect_upstream(listen)
+        if pair is None:
             cw.close()
             return
+        ur, uw = pair
         await asyncio.gather(pump(cr, uw, False), pump(ur, cw, True))
 
 
@@ -241,16 +308,14 @@ let
 
 
     async def main():
-        upstream = os.environ.get("SCROLL_REAL_SOCK") or os.environ.get("SWAYSOCK")
-        if not upstream:
-            sys.exit("set SWAYSOCK (or SCROLL_REAL_SOCK) to the real compositor socket")
         listen = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
             os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "${cfg.socketName}")
         if os.path.exists(listen):
             os.unlink(listen)
         server = await asyncio.start_unix_server(
-            lambda r, w: handle(r, w, upstream), path=listen)
-        print(f"shim: {listen} -> {upstream}  (favourites {FAVOURITES})", flush=True)
+            lambda r, w: handle(r, w, listen), path=listen)
+        print(f"shim: {listen} -> {upstream_candidates(listen) or 'no upstream yet'}"
+              f"  (favourites {FAVOURITES})", flush=True)
         # AFTER `start_unix_server`, never before: the whole value of the
         # notification is that the socket is already accepting when it is sent.
         sd_notify("READY=1")
@@ -411,10 +476,14 @@ in
           # the cycle. `Requisite=` is gone for the same reason: it enqueues a verify-active job on
           # graphical-session.target, which is the very node the loop closed through.
           #
-          # Starting a moment early is already handled, and was before this: the proxy reads
-          # SWAYSOCK out of the systemd user environment, which the compositor puts there on
-          # startup, so a too-early start fails on a missing variable and `Restart=on-failure` with
-          # `RestartSec=1` below picks it straight back up.
+          # Starting a moment early is harmless for the same reason a compositor RESTART mid-
+          # session is (see `upstream_candidates` in the shim): the upstream socket is resolved per
+          # client connection, never once at startup. Started before the compositor, the proxy
+          # binds its socket, notifies, and simply has no live candidate yet — an early ask is
+          # accepted and closed, exactly what the same client would get from a socket that does
+          # not exist. In practice even that is rare: the clients this proxy exists for are bars,
+          # which are Wayland clients and cannot come up before the compositor, whose IPC socket
+          # is bound before it serves its first Wayland client.
           After = [ "graphical-session-pre.target" ];
         };
         Service = {
@@ -433,6 +502,9 @@ in
           # this to `exec` on the theory that clients retry — ironbar does not.
           Type = "notify";
           ExecStart = cfg.command;
+          # NOT the recovery path for a compositor restart — that needs no unit restart at all,
+          # upstream resolution being per-connection. This covers what can still kill the unit:
+          # a wrong `interpreter` (203/EXEC), a bind failure, the interpreter dying outright.
           Restart = "on-failure";
           RestartSec = 1;
         };

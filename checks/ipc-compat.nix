@@ -148,6 +148,36 @@ let
     "it is NOT ordered after graphical-session.target — that closes a cycle through its clients" =
       pinnedUnit.Unit.After == [ "graphical-session-pre.target" ]
       && !(pinnedUnit.Unit ? Requisite);
+    # THE REGRESSION THIS PINS. The unit outlives the compositor — PartOf= binds it to the SESSION,
+    # but scroll's socket path embeds scroll's PID. A shim that resolved its upstream once, at
+    # startup, worked until the first compositor crash of the session and then answered every
+    # client connect with an immediate close, for days: every bar started after that ran with no
+    # workspace switcher, nothing failed, nothing logged. Upstream must be resolved per CLIENT
+    # connection — environment first (the configured contract), then a connect-tested glob over
+    # the compositor's socket pattern, which is what makes a restart survivable.
+    # Structural, not substring-only, for the same reason as the sd_notify ordering test above: a
+    # refactor that hoists `upstream_candidates()` into a startup-scope cache would keep every
+    # substring present while putting the stale-path bug straight back. The candidate computation
+    # must live INSIDE the per-connection dialer, between its `def` and the handler's.
+    "upstream candidates are computed inside the per-connection dialer, never cached at startup" =
+      let parts = lib.splitString "async def connect_upstream(listen)" pinnedScript.text;
+      in builtins.length parts >= 2
+      && has (builtins.head (lib.splitString "async def handle" (lib.last parts)))
+        "upstream_candidates(listen)"
+      && has pinnedScript.text "scroll-ipc.*.sock";
+    "...and the per-connection handler dials through it" =
+      has (lib.last (lib.splitString "async def handle" pinnedScript.text))
+        "await connect_upstream(listen)";
+    # Scoped to main()'s body so a future comment merely MENTIONING sys.exit elsewhere cannot trip
+    # it; within that scope, no exit path before the bind is the property the incident demands.
+    "a start without a compositor binds and notifies instead of dying on a missing variable" =
+      let mainTail = lib.last (lib.splitString "async def main" pinnedScript.text);
+      in has mainTail "start_unix_server" && !(has mainTail "sys.exit");
+    "the discovery glob is confined to $XDG_RUNTIME_DIR — never the world-writable /tmp fallback" =
+      has pinnedScript.text "run = os.environ.get(\"XDG_RUNTIME_DIR\")\n"
+      && has pinnedScript.text "if run else []";
+    "the proxy's own socket is never a candidate — a proxy that can dial itself loops to fd death" =
+      has pinnedScript.text "path != listen";
 
     # ── the two off switches ──────────────────────────────────────────────────────────────────
     "enableService = false writes the script but declares no unit" =
