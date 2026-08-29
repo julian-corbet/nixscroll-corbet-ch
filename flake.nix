@@ -73,6 +73,7 @@
           mesaEnvironment = {
             eglVendor = "${pkgs.mesa}/share/glvnd/egl_vendor.d/50_mesa.json";
             libglDrivers = "${pkgs.mesa}/lib/dri";
+            gbmBackends = "${pkgs.mesa}/lib/gbm";
           };
           wrappedScroll = scroll-flake.packages.${system}.default.override {
             # This hook is part of nixpkgs' sway wrapper and therefore affects only
@@ -80,6 +81,7 @@
             extraSessionCommands = ''
               export __EGL_VENDOR_LIBRARY_FILENAMES="${mesaEnvironment.eglVendor}"
               export LIBGL_DRIVERS_PATH="${mesaEnvironment.libglDrivers}"
+              export GBM_BACKENDS_PATH="${mesaEnvironment.gbmBackends}"
             '';
           };
           scroll = wrappedScroll.overrideAttrs (old: {
@@ -207,6 +209,13 @@
           scroll = self.packages.${system}.scroll;
           inherit scrollModule;
         };
+        # Inspect the built wrapper rather than trusting its passthru metadata:
+        # Arch has no /run/opengl-driver, so all three Nix Mesa search paths
+        # must be exported by the executable that the seated unit launches.
+        wrapper-contract = import ./checks/wrapper-contract.nix {
+          pkgs = nixpkgs.legacyPackages.${system};
+          scrollPackage = self.packages.${system}.scroll;
+        };
         # The Arch plane, which `nix flake check` likewise never evaluates on its own. Its whole
         # output is WHICH OF TWO PACKAGE LISTS each name lands in, and on this platform the wrong
         # answer in one direction fails the host's entire pacman transaction -- see the check's own
@@ -223,6 +232,10 @@
         runtime-vm = import ./checks/runtime-vm.nix {
           pkgs = nixpkgs.legacyPackages.${system};
           nixosModule = self.nixosModules.scroll;
+          scrollPackage = self.packages.${system}.scroll;
+        };
+        runtime-tty-gpu-vm = import ./checks/runtime-tty-gpu-vm.nix {
+          pkgs = nixpkgs.legacyPackages.${system};
           scrollPackage = self.packages.${system}.scroll;
         };
       });

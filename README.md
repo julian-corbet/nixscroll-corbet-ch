@@ -18,8 +18,9 @@ Four pieces, because scroll not being in nixpkgs is a real constraint that shape
 Both of scroll-flake's own source inputs follow `cscroll`, so the recipe cannot silently reach
 around the runtime-product boundary to upstream Scroll. Full credit to
 [Diax170](https://github.com/Diax170) for the packaging work; nixscroll selects the source and adds
-two narrow runtime provisions. Only the `scroll` executable exports Nix Mesa's EGL-vendor file and
-`LIBGL_DRIVERS_PATH`, which is required when this Nix-built compositor runs on Arch; no
+two narrow runtime provisions. Only the `scroll` executable exports Nix Mesa's EGL-vendor file,
+`LIBGL_DRIVERS_PATH`, and `GBM_BACKENDS_PATH`, which are required when this Nix-built compositor
+runs on Arch; no
 hardware-specific Vulkan ICD is guessed. The IPC helper's `/usr/bin/env python3` shebang is patched
 to an absolute Nix-store interpreter while the outer lndir package is built. Neither provision adds
 Python or Mesa tools to the compositor's runtime `PATH`, and neither wraps `scrollmsg` or the IPC
@@ -49,7 +50,7 @@ this same namespace; use one or the other, not both, since they'd both try to ow
 full Scroll descriptor in `nixdesktop.launcher.compositors.scroll`, including this flake's cscroll
 derivation. The seated unit therefore executes the Nix-store compositor directly; it never falls
 back to the independent AUR `sway-scroll` build. The package's `scroll`-only wrapper keeps the Nix
-Mesa EGL/DRI closure usable on Arch, while nixgpu/nixdesktop retain device selection and cgroup
+Mesa EGL/DRI/GBM closure usable on Arch, while nixgpu/nixdesktop retain device selection and cgroup
 ownership; no nixGL wrapper or Python runtime entry is added to the compositor's `PATH`. The same
 derivation is installed into the system profile so `scrollmsg` and
 `scroll-swayipc-compat` remain available without retaining the AUR package.
