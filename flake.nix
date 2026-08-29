@@ -88,14 +88,16 @@
               # A small, evaluable packaging contract for checks and downstream diagnostics.
               nixscrollMesaEnvironment = mesaEnvironment;
             };
-            postFixup = (old.postFixup or "") + ''
+            # scroll-flake's outer package is an lndir-based buildEnv with a
+            # custom buildCommand, so normal stdenv fixup phases never run.
+            # Patch the copied-out helper inside that command instead.
+            buildCommand = (old.buildCommand or "") + ''
               helper="$out/bin/scroll-swayipc-compat"
               if [[ ! -x "$helper" ]]; then
                 echo "nixscroll: cscroll did not install $helper" >&2
                 exit 1
               fi
-              # scroll-flake's outer package is an lndir tree over the unwrapped
-              # build. Copy only this helper out of that tree before patching;
+              # Copy only this helper out of the lndir tree before patching;
               # patchShebangs intentionally does not rewrite a store symlink.
               if [[ -L "$helper" ]]; then
                 helperSource="$(readlink -f "$helper")"

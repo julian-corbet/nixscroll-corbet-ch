@@ -21,8 +21,9 @@ around the runtime-product boundary to upstream Scroll. Full credit to
 two narrow runtime provisions. Only the `scroll` executable exports Nix Mesa's EGL-vendor file and
 `LIBGL_DRIVERS_PATH`, which is required when this Nix-built compositor runs on Arch; no
 hardware-specific Vulkan ICD is guessed. The IPC helper's `/usr/bin/env python3` shebang is patched
-to an absolute Nix-store interpreter during fixup. Neither provision adds Python or Mesa tools to
-the compositor's runtime `PATH`, and neither wraps `scrollmsg` or the IPC helper.
+to an absolute Nix-store interpreter while the outer lndir package is built. Neither provision adds
+Python or Mesa tools to the compositor's runtime `PATH`, and neither wraps `scrollmsg` or the IPC
+helper.
 
 `flake.lock` pins the public cscroll revision. No machine-local path or second
 upstream Scroll revision is part of the published integration.

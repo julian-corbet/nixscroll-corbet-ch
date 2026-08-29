@@ -106,7 +106,12 @@ pkgs.testers.nixosTest {
             "--favorite 1 --favorite 5 "
             "/run/cscroll-vm/compat.sock --upstream $socket"
         )
-        machine.wait_until_succeeds("test -S /run/cscroll-vm/compat.sock")
+        machine.wait_until_succeeds(
+            "test -S /run/cscroll-vm/compat.sock "
+            "|| systemctl is-failed --quiet cscroll-compat.service",
+            timeout=60,
+        )
+        machine.succeed("systemctl is-active --quiet cscroll-compat.service")
         machine.succeed(
             "SCROLLSOCK= SWAYSOCK=/run/cscroll-vm/compat.sock "
             "${scrollPackage}/bin/scrollmsg -t get_workspaces "

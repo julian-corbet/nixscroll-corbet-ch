@@ -41,7 +41,7 @@ let
   };
   moduleSource = builtins.readFile ../home/ipc-compat.nix;
   flakeSource = builtins.readFile ../flake.nix;
-  packagePostFixup = builtins.unsafeDiscardStringContext (scrollPackage.postFixup or "");
+  packageBuildCommand = builtins.unsafeDiscardStringContext (scrollPackage.buildCommand or "");
   pythonPath = builtins.unsafeDiscardStringContext (toString pkgs.python3);
   nativeBuildInputPaths = map
     (input: builtins.unsafeDiscardStringContext (toString input))
@@ -75,7 +75,7 @@ let
       !(builtins.tryEval
         (evalWith { enable = true; favorites = [ 0 ]; }).programs.scroll.ipcCompat.command).success;
 
-    # The source follows are the package boundary. The post-fixup gate both
+    # The source follows are the package boundary. The outer build gate both
     # checks that cscroll installed the helper and makes its interpreter a
     # direct store reference without wrapping the compositor's runtime PATH.
     "both scroll-flake source slots follow the one cscroll input" =
@@ -87,15 +87,15 @@ let
       && !(has flakeSource "path:/home/");
     "Python is available only to patch the installed helper shebang" =
       lib.elem pythonPath nativeBuildInputPaths
-      && has packagePostFixup ''patchShebangs "$helper"''
-      && has packagePostFixup ''expected='#!${pythonPath}/bin/python3'';
-    "package fixup fails closed when cscroll omits the helper" =
-      has packagePostFixup ''helper="$out/bin/scroll-swayipc-compat"''
-      && has packagePostFixup ''if [[ ! -x "$helper" ]]'';
+      && has packageBuildCommand ''patchShebangs "$helper"''
+      && has packageBuildCommand ''expected='#!${pythonPath}/bin/python3'';
+    "package build fails closed when cscroll omits the helper" =
+      has packageBuildCommand ''helper="$out/bin/scroll-swayipc-compat"''
+      && has packageBuildCommand ''if [[ ! -x "$helper" ]]'';
     "the lndir helper is copied before its shebang is patched" =
-      has packagePostFixup ''if [[ -L "$helper" ]]''
-      && has packagePostFixup ''helperSource="$(readlink -f "$helper")"''
-      && has packagePostFixup ''cp "$helperSource" "$helper"'';
+      has packageBuildCommand ''if [[ -L "$helper" ]]''
+      && has packageBuildCommand ''helperSource="$(readlink -f "$helper")"''
+      && has packageBuildCommand ''cp "$helperSource" "$helper"'';
     "only scroll receives the portable Nix Mesa runtime environment" =
       builtins.unsafeDiscardStringContext (mesaEnvironment.eglVendor or "")
       == "${mesaPath}/share/glvnd/egl_vendor.d/50_mesa.json"
