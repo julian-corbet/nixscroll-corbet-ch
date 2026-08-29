@@ -17,6 +17,10 @@ pkgs.testers.nixosTest {
       package = scrollPackage;
     };
     environment.systemPackages = [
+      # The packaged Scroll wrapper starts a private session bus when no
+      # DBUS_SESSION_BUS_ADDRESS is inherited. The VM needs both
+      # dbus-run-session and the dbus-daemon it execs.
+      pkgs.dbus
       pkgs.jq
     ];
     virtualisation = {
@@ -56,9 +60,14 @@ pkgs.testers.nixosTest {
             "--property=Environment=WLR_LIBINPUT_NO_DEVICES=1 "
             "${scrollPackage}/bin/scroll -c ${config}"
         )
+        # Stop immediately when the unit fails instead of spending the test's
+        # full timeout waiting for a socket a dead compositor cannot create.
         machine.wait_until_succeeds(
-            "test $(find /run/cscroll-vm -maxdepth 1 -type s -name 'scroll-ipc.*.sock' | wc -l) -eq 1"
+            "test $(find /run/cscroll-vm -maxdepth 1 -type s -name 'scroll-ipc.*.sock' | wc -l) -eq 1 "
+            "|| systemctl is-failed --quiet cscroll-vm.service",
+            timeout=60,
         )
+        machine.succeed("systemctl is-active --quiet cscroll-vm.service")
         machine.succeed(
             "find /run/cscroll-vm -maxdepth 1 -type s -name 'scroll-ipc.*.sock' -print | sort "
             "| comm -13 /run/cscroll-before - > /run/cscroll-owned-sockets"
