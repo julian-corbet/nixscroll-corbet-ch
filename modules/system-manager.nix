@@ -95,6 +95,12 @@ in
 
     nixdesktop.launcher.compositors.scroll = descriptorFor cfg.package;
 
+    # The launcher keeps the compositor unit on an exact store path, but that
+    # reference alone does not put scrollmsg or the bundled IPC helper on the
+    # operator's PATH. Install the same derivation into the system profile so
+    # the complete cscroll command surface is present without an AUR shadow.
+    environment.systemPackages = [ cfg.package ];
+
     # The runtime manifest, not a second hand-maintained list, decides the
     # complete set removed when nixscroll is disabled.
     nixarch.packages.pacman = archPackages;

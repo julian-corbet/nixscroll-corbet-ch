@@ -15,6 +15,10 @@ let
         type = lib.types.attrsOf lib.types.anything;
         default = { };
       };
+      environment.systemPackages = lib.mkOption {
+        type = lib.types.listOf lib.types.package;
+        default = [ ];
+      };
       environment.etc = lib.mkOption {
         default = { };
         type = lib.types.attrsOf (lib.types.submodule {
@@ -64,6 +68,8 @@ let
     "the compositor descriptor uses the selected cscroll derivation" =
       toString descriptor.package == toString fakeCscroll
       && descriptor.command == "scroll";
+    "the complete cscroll command surface is on the system path" =
+      enabled.environment.systemPackages == [ fakeCscroll ];
     "the descriptor carries Scroll's compositor mechanisms" =
       descriptor.deviceEnvironment == [ "WLR_DRM_DEVICES" ]
       && descriptor.rendererEnvironment.auto == { }
@@ -88,6 +94,7 @@ let
       disabled.nixarch.packages.pacman == [ ]
       && disabled.nixarch.packages.aur == [ ]
       && disabled.nixdesktop.launcher.compositors == { }
+      && disabled.environment.systemPackages == [ ]
       && disabled.environment.etc == { };
 
     "portal routing is desktop-specific rather than global" =

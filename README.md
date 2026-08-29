@@ -49,7 +49,9 @@ full Scroll descriptor in `nixdesktop.launcher.compositors.scroll`, including th
 derivation. The seated unit therefore executes the Nix-store compositor directly; it never falls
 back to the independent AUR `sway-scroll` build. The package's `scroll`-only wrapper keeps the Nix
 Mesa EGL/DRI closure usable on Arch, while nixgpu/nixdesktop retain device selection and cgroup
-ownership; no nixGL wrapper or Python runtime entry is added to the compositor's `PATH`.
+ownership; no nixGL wrapper or Python runtime entry is added to the compositor's `PATH`. The same
+derivation is installed into the system profile so `scrollmsg` and
+`scroll-swayipc-compat` remain available without retaining the AUR package.
 
 The external component list is read directly from cscroll's
 `runtime-components.toml`: `swaybg`, `wlr-randr`,
@@ -74,7 +76,7 @@ project convention — both use `programs.scroll`, matching how nixpkgs itself n
 | `homeManagerModules.scroll` (`.default`) | home-manager | `~/.config/scroll/config`, generated from `programs.scroll.*`. Installs nothing. |
 | `homeManagerModules.ipcCompat` | home-manager | selects cscroll's packaged strict-Sway IPC helper (`programs.scroll.ipcCompat`) and optionally declares its user unit — see [Strict sway clients](#strict-sway-clients) below. Contains no proxy implementation. |
 | `nixosModules.scroll` (`.default`) | NixOS | runtime bundle + session package; complete Scroll descriptor when nixdesktop is composed |
-| `systemManagerModules.scroll` (`.default`) | [system-manager](https://github.com/numtide/system-manager) (Arch/CachyOS) | one `nixscroll.enable` boundary: cscroll descriptor, every required manifest component, and desktop-specific `scroll-portals.conf` |
+| `systemManagerModules.scroll` (`.default`) | [system-manager](https://github.com/numtide/system-manager) (Arch/CachyOS) | one `nixscroll.enable` boundary: cscroll command surface, descriptor, every required manifest component, and desktop-specific `scroll-portals.conf` |
 
 ## Not scroll's own named keymap modes
 
