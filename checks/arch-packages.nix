@@ -1,6 +1,6 @@
-# Evaluate the system-manager integration. The important boundary is that the
-# compositor descriptor points at cscroll while pacman only receives optional
-# wlroots companions.
+# Evaluate the system-manager integration. The cscroll manifest is the only
+# package list: enabling nixscroll registers the compositor, materializes every
+# required external component, and installs the desktop-specific portal route.
 { pkgs, lib ? pkgs.lib, systemManagerModule }:
 let
   fakeCscroll = pkgs.writeShellScriptBin "scroll" "exit 0";
@@ -24,35 +24,40 @@ let
           };
         });
       };
+      assertions = lib.mkOption {
+        type = lib.types.listOf lib.types.unspecified;
+        default = [ ];
+      };
     };
   };
 
-  evaluateAll = extraConfig: (lib.evalModules {
+  evaluate = extraConfig: (lib.evalModules {
     specialArgs = { inherit pkgs; };
     modules = [
       stubs
       systemManagerModule
-      { nixscroll.install.package = fakeCscroll; }
       extraConfig
     ];
   }).config;
 
-  packagesOf = extraConfig: (evaluateAll extraConfig).nixarch.packages;
-  etcOf = extraConfig: (evaluateAll extraConfig).environment.etc;
-
-  base = evaluateAll { };
-  descriptor = base.nixdesktop.launcher.compositors.scroll;
-  nothing = packagesOf { };
-  companions = packagesOf {
-    nixscroll.install = {
-      wallpaper.enable = true;
-      outputControl.enable = true;
-      portal.enable = true;
+  enabled = evaluate {
+    nixscroll = {
+      enable = true;
+      package = fakeCscroll;
     };
   };
+  disabled = evaluate { };
+  kde = evaluate {
+    nixscroll = {
+      enable = true;
+      package = fakeCscroll;
+      portalFallback = "kde";
+    };
+  };
+
+  descriptor = enabled.nixdesktop.launcher.compositors.scroll;
   portalPath = "xdg-desktop-portal/scroll-portals.conf";
-  portalEtc = etcOf { nixscroll.install.portal.enable = true; };
-  portalConf = portalEtc.${portalPath} or null;
+  portal = enabled.environment.etc.${portalPath};
   sorted = lib.sort (a: b: a < b);
 
   results = {
@@ -65,38 +70,34 @@ let
       && !descriptor.supportsNotify
       && descriptor.currentDesktop == "scroll";
 
-    "cscroll is never mirrored into pacman or the AUR" =
-      nothing.pacman == [ ] && nothing.aur == [ ];
-    "all optional companions use the Arch repository plane" =
-      sorted companions.pacman
-      == [ "swaybg" "wlr-randr" "xdg-desktop-portal-wlr" ]
-      && companions.aur == [ ];
-    "each companion remains an independent choice" =
-      (packagesOf { nixscroll.install.wallpaper.enable = true; }).pacman == [ "swaybg" ]
-      && (packagesOf { nixscroll.install.outputControl.enable = true; }).pacman == [ "wlr-randr" ];
+    "the manifest materializes the complete required Arch bundle" =
+      sorted enabled.nixarch.packages.pacman
+      == [
+        "swaybg"
+        "wlr-randr"
+        "xdg-desktop-portal-wlr"
+        "xorg-xwayland"
+      ]
+      && enabled.nixarch.packages.aur == [ ];
+    "disabling nixscroll removes the complete product boundary" =
+      disabled.nixarch.packages.pacman == [ ]
+      && disabled.nixarch.packages.aur == [ ]
+      && disabled.nixdesktop.launcher.compositors == { }
+      && disabled.environment.etc == { };
 
-    "portal enable installs its wlroots backend" =
-      (packagesOf { nixscroll.install.portal.enable = true; }).pacman
-      == [ "xdg-desktop-portal-wlr" ];
     "portal routing is desktop-specific rather than global" =
-      lib.attrNames portalEtc == [ portalPath ]
-      && !(portalEtc ? "xdg-desktop-portal/portals.conf");
-    "the portal file cannot be silently skipped" =
-      portalConf != null && portalConf.replaceExisting;
+      lib.attrNames enabled.environment.etc == [ portalPath ]
+      && !(enabled.environment.etc ? "xdg-desktop-portal/portals.conf");
+    "the portal file cannot be silently skipped" = portal.replaceExisting;
     "the portal file selects wlr capture and a general fallback" =
-      portalConf != null
-      && lib.hasInfix "\ndefault=gtk\n" "\n${portalConf.text}"
-      && lib.hasInfix "\norg.freedesktop.impl.portal.ScreenCast=wlr\n" portalConf.text
-      && lib.hasInfix "\norg.freedesktop.impl.portal.Screenshot=wlr\n" portalConf.text;
+      lib.hasInfix "\ndefault=gtk\n" "\n${portal.text}"
+      && lib.hasInfix "\norg.freedesktop.impl.portal.ScreenCast=wlr\n" portal.text
+      && lib.hasInfix "\norg.freedesktop.impl.portal.Screenshot=wlr\n" portal.text;
     "the portal fallback remains configurable" =
-      let
-        kde = (etcOf {
-          nixscroll.install.portal = { enable = true; fallback = "kde"; };
-        }).${portalPath} or null;
+      let text = kde.environment.etc.${portalPath}.text;
       in
-      kde != null
-      && lib.hasInfix "\ndefault=kde\n" "\n${kde.text}"
-      && !(lib.hasInfix "default=gtk" kde.text);
+      lib.hasInfix "\ndefault=kde\n" "\n${text}"
+      && !(lib.hasInfix "default=gtk" text);
   };
 
   failed = lib.attrNames (lib.filterAttrs (_: passed: !passed) results);

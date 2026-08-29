@@ -5,9 +5,9 @@ close downstream of [scroll](https://github.com/dawsers/scroll) — a fork of
 [sway](https://github.com/swaywm/sway) with a scrolling, PaperWM-style tiling layout — plus the
 packaging and system wiring it needs since Scroll is not in nixpkgs. Four outputs:
 a package built from cscroll, a home-manager module that writes `~/.config/scroll/config` from
-structured options, a thin NixOS module for the system side, and an Arch/CachyOS plane that
-registers cscroll with the compositor launcher and names optional companions for the distro
-reconciler.
+structured options, a NixOS module for the system side, and an Arch/CachyOS plane that
+registers cscroll with the compositor launcher and materializes its complete runtime-component
+manifest through the distro reconciler.
 
 ## The split
 
@@ -24,14 +24,8 @@ hardware-specific Vulkan ICD is guessed. The IPC helper's `/usr/bin/env python3`
 to an absolute Nix-store interpreter during fixup. Neither provision adds Python or Mesa tools to
 the compositor's runtime `PATH`, and neither wraps `scrollmsg` or the IPC helper.
 
-Until `corbet-labs/cscroll` exists publicly, evaluate a local checkout with an ephemeral override:
-
-```sh
-nix flake check --override-input cscroll path:/path/to/cscroll --no-write-lock-file
-```
-
-No machine-local path belongs in `flake.nix` or `flake.lock`. The real cscroll lock entry is made
-after publication.
+`flake.lock` pins the public cscroll revision. No machine-local path or second
+upstream Scroll revision is part of the published integration.
 
 **Config generation** (`homeManagerModules.scroll`, namespace `programs.scroll`) — a home-manager
 module that renders `~/.config/scroll/config` from a structured option tree instead of hand-edited
@@ -47,19 +41,23 @@ want that fuller sway.nix-style module, scroll-flake ships its own `nixosModules
 this same namespace; use one or the other, not both, since they'd both try to own
 `programs.scroll`.
 
-**Arch/CachyOS** (`systemManagerModules.scroll`, namespace `nixscroll.install`) — registers the
+**Arch/CachyOS** (`systemManagerModules.scroll`, namespace `nixscroll`) — when
+`nixscroll.enable = true`, registers the
 full Scroll descriptor in `nixdesktop.launcher.compositors.scroll`, including this flake's cscroll
 derivation. The seated unit therefore executes the Nix-store compositor directly; it never falls
 back to the independent AUR `sway-scroll` build. The package's `scroll`-only wrapper keeps the Nix
 Mesa EGL/DRI closure usable on Arch, while nixgpu/nixdesktop retain device selection and cgroup
 ownership; no nixGL wrapper or Python runtime entry is added to the compositor's `PATH`.
 
-Three optional companions remain Arch package names: `swaybg`, `wlr-randr`, and
-`xdg-desktop-portal-wlr`. Each is independent and off by default. Enabling the portal backend also
-writes `/etc/xdg-desktop-portal/scroll-portals.conf`, selecting `wlr` for ScreenCast and Screenshot
-and a configurable general fallback (`portal.fallback`, default `gtk`). This file is
-desktop-specific because nixdesktop's launcher now sets `XDG_CURRENT_DESKTOP=scroll`; nixscroll no
-longer writes a global `/etc/xdg-desktop-portal/portals.conf` override.
+The external component list is read directly from cscroll's
+`runtime-components.toml`: `swaybg`, `wlr-randr`,
+`xdg-desktop-portal-wlr`, and `xorg-xwayland`. They are one required,
+removable product bundle rather than four choices that can silently produce an
+incomplete compositor. The module also writes
+`/etc/xdg-desktop-portal/scroll-portals.conf`, selecting `wlr` for
+ScreenCast and Screenshot and `portalFallback` (default `gtk`) for the
+remaining interfaces. This file is desktop-specific because nixdesktop's
+launcher sets `XDG_CURRENT_DESKTOP=scroll`.
 
 Neither the config-generation module nor the NixOS module invents its own option namespace per
 project convention — both use `programs.scroll`, matching how nixpkgs itself names
@@ -74,7 +72,7 @@ project convention — both use `programs.scroll`, matching how nixpkgs itself n
 | `homeManagerModules.scroll` (`.default`) | home-manager | `~/.config/scroll/config`, generated from `programs.scroll.*`. Installs nothing. |
 | `homeManagerModules.ipcCompat` | home-manager | selects cscroll's packaged strict-Sway IPC helper (`programs.scroll.ipcCompat`) and optionally declares its user unit — see [Strict sway clients](#strict-sway-clients) below. Contains no proxy implementation. |
 | `nixosModules.scroll` (`.default`) | NixOS | `environment.systemPackages` + `services.displayManager.sessionPackages` for `programs.scroll.package` |
-| `systemManagerModules.scroll` (`.default`) | [system-manager](https://github.com/numtide/system-manager) (Arch/CachyOS) | full `nixdesktop` compositor descriptor pointing at cscroll; optional Arch companions; desktop-specific `/etc/xdg-desktop-portal/scroll-portals.conf` when the portal backend is enabled |
+| `systemManagerModules.scroll` (`.default`) | [system-manager](https://github.com/numtide/system-manager) (Arch/CachyOS) | one `nixscroll.enable` boundary: cscroll descriptor, every required manifest component, and desktop-specific `scroll-portals.conf` |
 
 ## Not scroll's own named keymap modes
 

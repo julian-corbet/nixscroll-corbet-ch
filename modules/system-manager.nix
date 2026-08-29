@@ -7,21 +7,44 @@
 # not wrap scrollmsg or the IPC helper. nixgpu/nixdesktop remain the owners of
 # device selection and cgroup access, and this module adds no nixGL/runtime-PATH
 # wrapper of its own.
-{ self }:
+{ self, runtimeManifest }:
 { lib, config, pkgs, ... }:
 let
-  cfg = config.nixscroll.install;
+  cfg = config.nixscroll;
   defaultPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.scroll;
+  requiredExternal = lib.filter
+    (component:
+      component.required
+      && component.kind != "bundled-command")
+    runtimeManifest.component;
+  componentById = id:
+    let
+      matches = lib.filter (component: component.id == id) runtimeManifest.component;
+    in
+    if builtins.length matches == 1
+    then builtins.head matches
+    else throw "nixscroll: runtime manifest must contain exactly one component named ${id}";
+  portalComponent = componentById "capture-portal";
+  archPackages = map
+    (component:
+      component.arch-package
+      or (throw "nixscroll: component ${component.id} has no Arch package mapping"))
+    requiredExternal;
   portalsConf = ''
     [preferred]
-    default=${cfg.portal.fallback}
+    default=${cfg.portalFallback}
     org.freedesktop.impl.portal.ScreenCast=wlr
     org.freedesktop.impl.portal.Screenshot=wlr
     org.freedesktop.impl.portal.Inhibit=none
   '';
 in
 {
-  options.nixscroll.install = {
+  options.nixscroll = {
+    enable = lib.mkEnableOption ''
+      the complete cscroll runtime product, including every required external
+      component declared by cscroll's runtime-components.toml
+    '';
+
     package = lib.mkOption {
       type = lib.types.package;
       default = defaultPackage;
@@ -35,36 +58,7 @@ in
       '';
     };
 
-    wallpaper.enable = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = ''
-        Install swaybg from the Arch repositories. Scroll invokes swaybg for
-        image backgrounds; choosing a background remains private host policy.
-      '';
-    };
-
-    outputControl.enable = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = ''
-        Install wlr-randr for runtime inspection and temporary changes through
-        the wlroots output-management protocol.
-      '';
-    };
-
-    portal.enable = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = ''
-        Install xdg-desktop-portal-wlr and write the Scroll-specific
-        scroll-portals.conf selecting it for ScreenCast and Screenshot.
-        nixdesktop's launcher sets XDG_CURRENT_DESKTOP=scroll, so a global
-        portals.conf override is neither needed nor allowed here.
-      '';
-    };
-
-    portal.fallback = lib.mkOption {
+    portalFallback = lib.mkOption {
       type = lib.types.str;
       default = "gtk";
       example = "kde";
@@ -75,36 +69,47 @@ in
     };
   };
 
-  config = lib.mkMerge [
-    {
-      # Full descriptor, not just a package override. This remains sufficient
-      # after nixdesktop drops its temporary built-in Scroll row.
-      nixdesktop.launcher.compositors.scroll = {
-        package = cfg.package;
-        command = "scroll";
-        env = [ "WLR_DRM_DEVICES" ];
-        supportsVirtualOutputs = true;
-        supportsNotify = false;
-        currentDesktop = "scroll";
-      };
-    }
+  config = lib.mkIf cfg.enable {
+    assertions = [
+      {
+        assertion =
+          lib.all
+            (component:
+              component.required
+              && component ? command
+              && component ? reason)
+            runtimeManifest.component;
+        message =
+          "nixscroll: every cscroll runtime component must be required and "
+          + "carry a command and reason";
+      }
+      {
+        assertion =
+          portalComponent.configuration
+          == "resources/scroll-portals.conf";
+        message =
+          "nixscroll: cscroll's capture portal must retain the "
+          + "resources/scroll-portals.conf contract";
+      }
+    ];
 
-    # These companion packages are compositor-specific but independent. The
-    # Arch reconciler owns their installation; cscroll itself never enters an
-    # AUR or pacman list.
-    (lib.mkIf cfg.wallpaper.enable {
-      nixarch.packages.pacman = [ "swaybg" ];
-    })
-    (lib.mkIf cfg.outputControl.enable {
-      nixarch.packages.pacman = [ "wlr-randr" ];
-    })
-    (lib.mkIf cfg.portal.enable {
-      nixarch.packages.pacman = [ "xdg-desktop-portal-wlr" ];
-      environment.etc."xdg-desktop-portal/scroll-portals.conf" = {
-        # system-manager otherwise skips an occupied destination silently.
-        replaceExisting = true;
-        text = portalsConf;
-      };
-    })
-  ];
+    nixdesktop.launcher.compositors.scroll = {
+      package = cfg.package;
+      command = "scroll";
+      env = [ "WLR_DRM_DEVICES" ];
+      supportsVirtualOutputs = true;
+      supportsNotify = false;
+      currentDesktop = "scroll";
+    };
+
+    # The runtime manifest, not a second hand-maintained list, decides the
+    # complete set removed when nixscroll is disabled.
+    nixarch.packages.pacman = archPackages;
+
+    environment.etc."xdg-desktop-portal/scroll-portals.conf" = {
+      # system-manager otherwise skips an occupied destination silently.
+      replaceExisting = true;
+      text = portalsConf;
+    };
+  };
 }

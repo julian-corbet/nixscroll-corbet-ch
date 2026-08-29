@@ -8,17 +8,24 @@ on:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
-    # A hung job holds a runner and a concurrency slot indefinitely and never reports.
-    # Sized ~3x the observed p95 for this job (1.7m), floor 10, so a genuine slow run
-    # still passes while a wedged one fails fast instead of hanging forever.
-    timeout-minutes: 10
+    runs-on: ubuntu-24.04
+    # This suite now builds cscroll and boots an ephemeral NixOS VM. It is
+    # intentionally hosted by GHA for this public repository, not by a private
+    # fleet runner.
+    timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: cachix/install-nix-action@v27
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
+            sandbox = true
+
+      - name: Allow the NixOS VM test to use KVM
+        run: |
+          if [ -e /dev/kvm ]; then
+            sudo chmod 0666 /dev/kvm
+          fi
 
       # --all-systems is NOT optional here, and is the whole reason this file spells the command
       # out rather than running a bare `nix flake check`.

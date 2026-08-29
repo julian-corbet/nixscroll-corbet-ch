@@ -6,9 +6,8 @@
 
     # Runtime source and Nix integration are separate products. cscroll is deliberately a plain
     # source input: it contains Scroll, scrollmsg and tightly coupled runtime repairs, but no Nix
-    # module. corbet-labs/cscroll is the publication target; until it exists, local evaluation uses
-    # `--override-input cscroll path:/path/to/cscroll` and this repository commits no machine-local
-    # path. The lock entry is created only after that public source exists.
+    # module. The public source is pinned in flake.lock; no machine-local source
+    # path or independent upstream Scroll revision may bypass this boundary.
     cscroll = {
       url = "github:corbet-labs/cscroll";
       flake = false;
@@ -39,9 +38,18 @@
     };
   };
 
-  outputs = { self, nixpkgs, scroll-flake, nixhost, ... }:
+  outputs = { self, nixpkgs, cscroll, scroll-flake, nixhost, ... }:
     let
       forAllSystems = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" ];
+
+      runtimeManifest =
+        let
+          parsed = builtins.fromTOML
+            (builtins.readFile "${cscroll}/runtime-components.toml");
+        in
+        assert parsed.schema == 1;
+        assert builtins.isList parsed.component;
+        parsed;
 
       # `probeFact` closed over here, before the module system ever sees the result -- see the
       # `nixhost` input comment above. The exported value is a plain home-manager module function
@@ -110,17 +118,21 @@
         });
 
       # ── SYSTEM SIDE ───────────────────────────────────────────────────────────────────────
-      # Thin on purpose: installs the package and registers the wayland-sessions entry it ships,
-      # nothing more. Config generation (below) is a separate, optional concern — a consumer who
-      # only wants scroll launchable from a display manager, with scroll's own upstream default
-      # config, needs only this module.
-      nixosModules.scroll = import ./modules/nixos.nix { inherit self; };
+      # Installs the package plus every required external component from
+      # cscroll's manifest and registers the wayland-sessions entry it ships.
+      # Config generation (below) remains a separate concern.
+      nixosModules.scroll = import ./modules/nixos.nix {
+        inherit self runtimeManifest;
+      };
       nixosModules.default = self.nixosModules.scroll;
 
       # Arch/CachyOS plane. Registers the cscroll derivation and full Scroll launch descriptor
-      # with nixdesktop; only optional wlroots companions are delegated to pacman. Config
+      # with nixdesktop; required external components from cscroll's manifest
+      # are delegated to pacman as one removable bundle. Config
       # generation stays in homeManagerModules.scroll on both planes.
-      systemManagerModules.scroll = import ./modules/system-manager.nix { inherit self; };
+      systemManagerModules.scroll = import ./modules/system-manager.nix {
+        inherit self runtimeManifest;
+      };
       systemManagerModules.default = self.systemManagerModules.scroll;
 
       # ── CONFIG GENERATION ────────────────────────────────────────────────────────────────
@@ -199,6 +211,12 @@
         arch-packages = import ./checks/arch-packages.nix {
           pkgs = nixpkgs.legacyPackages.${system};
           systemManagerModule = self.systemManagerModules.scroll;
+        };
+      } // nixpkgs.lib.optionalAttrs (system == "x86_64-linux") {
+        runtime-vm = import ./checks/runtime-vm.nix {
+          pkgs = nixpkgs.legacyPackages.${system};
+          nixosModule = self.nixosModules.scroll;
+          scrollPackage = self.packages.${system}.scroll;
         };
       });
 
