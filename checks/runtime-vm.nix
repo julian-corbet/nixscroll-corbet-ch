@@ -58,6 +58,7 @@ pkgs.testers.nixosTest {
             "--property=Environment=WLR_HEADLESS_OUTPUTS=1 "
             "--property=Environment=WLR_RENDERER=pixman "
             "--property=Environment=WLR_LIBINPUT_NO_DEVICES=1 "
+            "--property=Environment=PATH=${pkgs.dbus}/bin:/run/current-system/sw/bin "
             "${scrollPackage}/bin/scroll -c ${config}"
         )
         # Stop immediately when the unit fails instead of spending the test's
