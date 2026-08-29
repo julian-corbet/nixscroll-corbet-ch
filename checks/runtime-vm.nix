@@ -59,7 +59,7 @@ pkgs.testers.nixosTest {
             "--property=Environment=WLR_RENDERER=pixman "
             "--property=Environment=WLR_LIBINPUT_NO_DEVICES=1 "
             "--property=Environment=PATH=${pkgs.dbus}/bin:/run/current-system/sw/bin "
-            "${scrollPackage}/bin/scroll -c ${config}"
+            "${scrollPackage}/bin/scroll --debug -c ${config}"
         )
         # Stop immediately when the unit fails instead of spending the test's
         # full timeout waiting for a socket a dead compositor cannot create.
