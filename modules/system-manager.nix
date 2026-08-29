@@ -7,7 +7,7 @@
 # not wrap scrollmsg or the IPC helper. nixgpu/nixdesktop remain the owners of
 # device selection and cgroup access, and this module adds no nixGL/runtime-PATH
 # wrapper of its own.
-{ self, runtimeManifest }:
+{ self, runtimeManifest, descriptorFor }:
 { lib, config, pkgs, ... }:
 let
   cfg = config.nixscroll;
@@ -93,14 +93,7 @@ in
       }
     ];
 
-    nixdesktop.launcher.compositors.scroll = {
-      package = cfg.package;
-      command = "scroll";
-      env = [ "WLR_DRM_DEVICES" ];
-      supportsVirtualOutputs = true;
-      supportsNotify = false;
-      currentDesktop = "scroll";
-    };
+    nixdesktop.launcher.compositors.scroll = descriptorFor cfg.package;
 
     # The runtime manifest, not a second hand-maintained list, decides the
     # complete set removed when nixscroll is disabled.

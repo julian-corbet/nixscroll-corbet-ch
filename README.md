@@ -34,7 +34,9 @@ gets installed by the NixOS module below, or by hand, or by a distro package) an
 for it. This is the module most consumers want.
 
 **System install** (`nixosModules.scroll`, same `programs.scroll` namespace) — installs the
-package and registers scroll as a selectable wayland-sessions entry for a display manager. Kept
+package and registers scroll as a selectable wayland-sessions entry for a display manager. When
+nixdesktop is composed, it also registers the same complete Scroll launch descriptor used on the
+system-manager plane; standalone use remains a valid installer. Kept
 deliberately thin — no module-level wrapper customization, no XDG portal config, no extra
 packages. (The package itself still carries the fixed Mesa environment described above.) If you
 want that fuller sway.nix-style module, scroll-flake ships its own `nixosModules.default` under
@@ -71,7 +73,7 @@ project convention — both use `programs.scroll`, matching how nixpkgs itself n
 | `packages.<system>.scroll` | flake package | cscroll source built with `Diax170/scroll-flake`'s recipe; includes `scroll`, `scrollmsg`, and `scroll-swayipc-compat` |
 | `homeManagerModules.scroll` (`.default`) | home-manager | `~/.config/scroll/config`, generated from `programs.scroll.*`. Installs nothing. |
 | `homeManagerModules.ipcCompat` | home-manager | selects cscroll's packaged strict-Sway IPC helper (`programs.scroll.ipcCompat`) and optionally declares its user unit — see [Strict sway clients](#strict-sway-clients) below. Contains no proxy implementation. |
-| `nixosModules.scroll` (`.default`) | NixOS | `environment.systemPackages` + `services.displayManager.sessionPackages` for `programs.scroll.package` |
+| `nixosModules.scroll` (`.default`) | NixOS | runtime bundle + session package; complete Scroll descriptor when nixdesktop is composed |
 | `systemManagerModules.scroll` (`.default`) | [system-manager](https://github.com/numtide/system-manager) (Arch/CachyOS) | one `nixscroll.enable` boundary: cscroll descriptor, every required manifest component, and desktop-specific `scroll-portals.conf` |
 
 ## Not scroll's own named keymap modes

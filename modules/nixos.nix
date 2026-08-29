@@ -11,8 +11,8 @@
 # XDG portal config, extraPackages, ...) under this same `programs.scroll` namespace if a consumer
 # wants that instead of this one.
 # Use one or the other, not both — they'd fight over the same option tree.
-{ self, runtimeManifest, ... }:
-{ config, lib, pkgs, ... }:
+{ self, runtimeManifest, descriptorFor, ... }:
+{ config, lib, options, pkgs, ... }:
 let
   cfg = config.programs.scroll;
   requiredExternal = lib.filter
@@ -55,8 +55,9 @@ in
     };
   };
 
-  config = lib.mkIf cfg.enable {
-    environment.systemPackages = [ cfg.package ] ++ companionPackages;
+  config = lib.mkIf cfg.enable (lib.mkMerge [
+    {
+      environment.systemPackages = [ cfg.package ] ++ companionPackages;
 
     # Native NixOS mechanism (mirrors nixpkgs' own programs.sway/programs.wayfire, etc): a
     # package's own build declares which sessions it provides — the scroll-flake recipe
@@ -65,6 +66,13 @@ in
     # share/wayland-sessions/scroll.desktop as a result. sessionPackages links that into the
     # system profile so display managers list "scroll" as a session — nothing here hand-writes
     # a .desktop entry that could drift from what the package actually ships.
-    services.displayManager.sessionPackages = [ cfg.package ];
-  };
+      services.displayManager.sessionPackages = [ cfg.package ];
+    }
+
+    # The integration owns Scroll's launch mechanisms on every plane, but
+    # remains usable as a standalone installer when nixdesktop is not composed.
+    (lib.optionalAttrs (lib.hasAttrByPath [ "nixdesktop" "launcher" "compositors" ] options) {
+      nixdesktop.launcher.compositors.scroll = descriptorFor cfg.package;
+    })
+  ]);
 }

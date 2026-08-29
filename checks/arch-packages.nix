@@ -65,7 +65,12 @@ let
       toString descriptor.package == toString fakeCscroll
       && descriptor.command == "scroll";
     "the descriptor carries Scroll's compositor mechanisms" =
-      descriptor.env == [ "WLR_DRM_DEVICES" ]
+      descriptor.deviceEnvironment == [ "WLR_DRM_DEVICES" ]
+      && descriptor.rendererEnvironment.auto == { }
+      && descriptor.rendererEnvironment.hardware == { }
+      && descriptor.rendererEnvironment.software.WLR_RENDERER == "pixman"
+      && descriptor.headlessEnvironment.WLR_BACKENDS == "headless"
+      && descriptor.supportsHeadless
       && descriptor.supportsVirtualOutputs
       && !descriptor.supportsNotify
       && descriptor.currentDesktop == "scroll";

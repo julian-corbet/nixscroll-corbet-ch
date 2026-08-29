@@ -56,6 +56,7 @@
       # taking the usual `{ lib, config, ... }`; nothing about consuming it changes.
       scrollModule = import ./home/scroll.nix { inherit (nixhost.lib) probeFact; };
       ipcCompatModule = import ./home/ipc-compat.nix { inherit self; };
+      descriptorFor = import ./lib/compositor-descriptor.nix;
     in
     {
       # ── PACKAGING ───────────────────────────────────────────────────────────────────────────
@@ -122,7 +123,7 @@
       # cscroll's manifest and registers the wayland-sessions entry it ships.
       # Config generation (below) remains a separate concern.
       nixosModules.scroll = import ./modules/nixos.nix {
-        inherit self runtimeManifest;
+        inherit self runtimeManifest descriptorFor;
       };
       nixosModules.default = self.nixosModules.scroll;
 
@@ -131,7 +132,7 @@
       # are delegated to pacman as one removable bundle. Config
       # generation stays in homeManagerModules.scroll on both planes.
       systemManagerModules.scroll = import ./modules/system-manager.nix {
-        inherit self runtimeManifest;
+        inherit self runtimeManifest descriptorFor;
       };
       systemManagerModules.default = self.systemManagerModules.scroll;
 
@@ -211,6 +212,10 @@
         arch-packages = import ./checks/arch-packages.nix {
           pkgs = nixpkgs.legacyPackages.${system};
           systemManagerModule = self.systemManagerModules.scroll;
+        };
+        nixos-integration = import ./checks/nixos-integration.nix {
+          pkgs = nixpkgs.legacyPackages.${system};
+          nixosModule = self.nixosModules.scroll;
         };
       } // nixpkgs.lib.optionalAttrs (system == "x86_64-linux") {
         runtime-vm = import ./checks/runtime-vm.nix {
