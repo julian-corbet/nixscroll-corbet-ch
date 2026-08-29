@@ -10,6 +10,9 @@
 let
   cfg = config.programs.scroll.ipcCompat;
   defaultPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.scroll;
+  favoriteArguments = lib.concatMap
+    (workspace: [ "--favorite" (toString workspace) ])
+    cfg.favorites;
 in
 {
   options.programs.scroll.ipcCompat = {
@@ -52,6 +55,19 @@ in
       '';
     };
 
+    favorites = lib.mkOption {
+      type = lib.types.listOf lib.types.ints.positive;
+      default = [ ];
+      apply = lib.unique;
+      example = [ 1 2 3 4 5 ];
+      description = ''
+        Positive numbered workspaces that the cscroll helper should retain for
+        strict workspace clients. The helper rekeys real numbered workspaces,
+        synthesizes absent favourites, and suppresses their empty events.
+        Leave empty when the client implements its own pinned-workspace policy.
+      '';
+    };
+
     socketPath = lib.mkOption {
       type = lib.types.str;
       readOnly = true;
@@ -77,7 +93,9 @@ in
     command = lib.mkOption {
       type = lib.types.str;
       readOnly = true;
-      default = "${cfg.executable} ${cfg.socketPath}";
+      default = lib.concatStringsSep " " (
+        [ cfg.executable ] ++ favoriteArguments ++ [ cfg.socketPath ]
+      );
       description = ''
         Complete command for the proxy. Published for consumers that declare the
         service through another session-service owner and set enableService=false.

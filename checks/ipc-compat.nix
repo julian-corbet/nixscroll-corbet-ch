@@ -35,6 +35,10 @@ let
     socketName = "compat.sock";
     serviceName = "scroll-compat";
   };
+  withFavorites = evalWith {
+    enable = true;
+    favorites = [ 1 2 2 5 ];
+  };
   moduleSource = builtins.readFile ../home/ipc-compat.nix;
   flakeSource = builtins.readFile ../flake.nix;
   packagePostFixup = builtins.unsafeDiscardStringContext (scrollPackage.postFixup or "");
@@ -62,8 +66,14 @@ let
       && !(has moduleSource "asyncio.start_unix_server")
       && !(has moduleSource "FAVOURITES =")
       && !(has moduleSource "def rewrite_layouts");
-    "workspace favourites and interpreter selection are not Nix options" =
-      !(cfg ? favorites) && !(cfg ? interpreter);
+    "workspace favourites select cscroll's packaged policy" =
+      withFavorites.programs.scroll.ipcCompat.favorites == [ 1 2 5 ]
+      && withFavorites.programs.scroll.ipcCompat.command
+      == "${fakeCscroll}/bin/scroll-swayipc-compat --favorite 1 --favorite 2 --favorite 5 %t/scroll-swaycompat.sock"
+      && !(cfg ? interpreter);
+    "workspace favourites must be positive" =
+      !(builtins.tryEval
+        (evalWith { enable = true; favorites = [ 0 ]; }).programs.scroll.ipcCompat.command).success;
 
     # The source follows are the package boundary. The post-fixup gate both
     # checks that cscroll installed the helper and makes its interpreter a

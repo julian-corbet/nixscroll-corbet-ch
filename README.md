@@ -108,17 +108,20 @@ is misbehaving: the compositor reports its own layout model honestly, and the cl
 against the schema it was written for. Scroll is the diverging runtime, so the repair belongs in
 cscroll rather than in a client or this Nix integration.
 
-The runtime repair lives in cscroll's installed `scroll-swayipc-compat` executable. It translates
-only the lossless schema pairs `horizontal` → `splith` and `vertical` → `splitv`, in the
-compositor-to-client direction, and recomputes frame lengths. `homeManagerModules.ipcCompat`
-contains no generated proxy program: it selects the cscroll package by absolute store path and
-optionally declares the user unit around it.
+The runtime repair lives in cscroll's installed `scroll-swayipc-compat` executable. It always
+translates the lossless schema pairs `horizontal` → `splith` and `vertical` → `splitv`, in the
+compositor-to-client direction, and recomputes frame lengths. When favourites are configured, it
+also gives numbered workspaces stable IDs, synthesizes absent favourites, and suppresses their
+empty events. `homeManagerModules.ipcCompat` contains no generated proxy program: it selects the
+cscroll package by absolute store path, passes policy as command arguments, and optionally
+declares the user unit around it.
 
 ```nix
 imports = [ inputs.nixscroll.homeManagerModules.ipcCompat ];
 
 programs.scroll.ipcCompat = {
   enable = true;
+  favorites = [ 1 2 3 4 5 ];
 };
 ```
 
@@ -137,9 +140,9 @@ finds that one first and connects straight past the proxy. Nothing errors — th
 behaves as though the proxy were not installed, which is indistinguishable from the proxy being
 broken.
 
-Workspace IDs, missing-workspace synthesis, pinned buttons and `change: "empty"` events are not
-rewritten. Those are client/UI policy and belong in a native client adapter such as cbar's, not in
-a compositor protocol bridge.
+Leave `favorites` empty for a native client such as cbar that owns its own pinned-workspace policy.
+The compatibility behaviour exists for strict Sway clients such as Ironbar and stays with the
+Scroll-specific bridge rather than being regenerated in each private desktop configuration.
 
 Reported upstream as [ironbar#1584](https://github.com/JakeStanger/ironbar/issues/1584).
 

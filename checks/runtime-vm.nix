@@ -103,6 +103,7 @@ pkgs.testers.nixosTest {
             "systemd-run --unit=cscroll-compat "
             "--property=Environment=XDG_RUNTIME_DIR=/run/cscroll-vm "
             "${scrollPackage}/bin/scroll-swayipc-compat "
+            "--favorite 1 --favorite 5 "
             "/run/cscroll-vm/compat.sock --upstream $socket"
         )
         machine.wait_until_succeeds("test -S /run/cscroll-vm/compat.sock")
@@ -110,11 +111,12 @@ pkgs.testers.nixosTest {
             "SCROLLSOCK= SWAYSOCK=/run/cscroll-vm/compat.sock "
             "${scrollPackage}/bin/scrollmsg -t get_workspaces "
             "| tee /run/cscroll-proxy.json "
-            "| jq -e 'any(.[]; .layout == \"splith\")'"
+            "| jq -e 'any(.[]; .num == 1 and .layout == \"splith\") "
+            "and any(.[]; .num == 5 and .id == 5 and .focused == false)'"
         )
         machine.succeed(
-            "jq 'map(.layout = \"IGNORED\")' /run/cscroll-direct.json > /run/cscroll-direct-normalized; "
-            "jq 'map(.layout = \"IGNORED\")' /run/cscroll-proxy.json > /run/cscroll-proxy-normalized; "
+            "jq 'map(.layout = \"IGNORED\" | .id = 0)' /run/cscroll-direct.json > /run/cscroll-direct-normalized; "
+            "jq 'map(select(.num != 5) | .layout = \"IGNORED\" | .id = 0)' /run/cscroll-proxy.json > /run/cscroll-proxy-normalized; "
             "cmp /run/cscroll-direct-normalized /run/cscroll-proxy-normalized"
         )
 
