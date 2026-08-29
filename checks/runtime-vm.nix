@@ -36,7 +36,7 @@ pkgs.testers.nixosTest {
         machine.succeed("test -f ${scrollPackage}/share/xdg-desktop-portal/scroll-portals.conf")
         machine.succeed("command -v swaybg")
         machine.succeed("command -v wlr-randr")
-        machine.succeed("command -v xdg-desktop-portal-wlr")
+        machine.succeed("test -x ${pkgs.xdg-desktop-portal-wlr}/libexec/xdg-desktop-portal-wlr")
         machine.succeed("command -v Xwayland")
 
     with subtest("the exact packaged binary accepts the fixture"):
