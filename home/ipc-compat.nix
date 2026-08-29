@@ -1,390 +1,54 @@
-# home/ipc-compat.nix — homeManagerModules.ipcCompat: a proxy that makes scroll's IPC readable by
-# strict sway clients, plus the user unit that runs it.
+# home/ipc-compat.nix — integrate cscroll's strict-Sway IPC runtime helper.
 #
-# ── WHY THIS IS NIXSCROLL'S PROBLEM AND NOT THE CLIENT'S ──────────────────────────────────────
-#
-# scroll is a sway fork, so it speaks sway's IPC protocol and every sway client finds it. What it
-# does not do is speak sway's exact SCHEMA. A client that deserialises the tree strictly — Rust
-# clients built on `swayipc` are the common case — hits a value sway never had and dies:
-#
-#     scroll:  layout = horizontal | vertical | none | output
-#     sway:    layout = splith | splitv | stacked | tabbed | output | dockarea | none
-#
-# `unknown variant 'vertical', expected one of ...` and the module is gone. That is not a
-# configuration error a consumer can fix from either side: the compositor is reporting its own
-# layout model honestly, and the client is validating against the schema it was written for. It
-# belongs here because scroll is the party that diverged.
-#
-# ── WHAT IT DOES, EXACTLY THREE THINGS, ALL ON THE COMPOSITOR->CLIENT DIRECTION ───────────────
-#
-#  1. LAYOUT VARIANTS. horizontal -> splith, vertical -> splitv. Lossless in the direction that
-#     matters: the axis is what both names encode.
-#
-#  2. WORKSPACE IDS, and this one is subtler than it looks. A compositor's workspace `id` is a
-#     CONTAINER id, not the workspace number — workspace "1" might be id 7. A client that builds a
-#     button for a workspace it has only ever seen NAMED (a pinned/favourite workspace that does
-#     not exist yet) has nothing to derive a container id from, so it parses the name as a number
-#     and then cannot find any workspace with that id. Its focus call resolves to nothing and
-#     returns, silently, with the click appearing to do nothing at all. Re-keying numbered
-#     workspaces to `id == num` makes the number a resolvable id, and synthesising the missing
-#     favourites into GET_WORKSPACES (deep-copied from a real entry, so the schema matches whatever
-#     the client expects) means every one of them resolves. Real and synthetic entries share an id
-#     space, so they converge rather than duplicate once the workspace is actually created.
-#
-#  3. THE `change: "empty"` EVENT for a favourite. An empty workspace is destroyed the moment you
-#     leave it and the compositor announces that; a client that maintains buttons from events then
-#     deletes the button, so pinned workspaces vanish after being visited once. Suppressing that
-#     one event for the favourites keeps them. The client's state then names a workspace that does
-#     not currently exist, which is harmless — its focus path re-queries GET_WORKSPACES, where the
-#     entry is synthesised again.
-#
-# Transforms 2 and 3 are `favorites`-gated: leave that list empty and only the layout rewrite runs.
-#
-# ── FRAMING, THE ONE WAY TO GET THIS BADLY WRONG ──────────────────────────────────────────────
-#
-# The protocol is length-prefixed (`i3-ipc` magic, u32 length, u32 type). A rewrite that changes
-# payload length MUST recompute the header. A naive stream substitution desynchronises the framing
-# and the client hangs forever with no error on either side.
-#
-# ── INSTALLS NOTHING, same doctrine as home/scroll.nix ────────────────────────────────────────
-#
-# The script is written as a config file, not built into the store, and `interpreter` names what
-# runs it. Default `/usr/bin/env python3` — correct on Arch and every ordinary distro, where a
-# Python interpreter is part of the base system and pulling a second one into the closure would be
-# pure weight. A NixOS consumer, where that path is NOT guaranteed to exist, sets
-# `interpreter = "${pkgs.python3}/bin/python3"`.
-#
-# ── UPSTREAM ──────────────────────────────────────────────────────────────────────────────────
-#
-# ironbar#1584 is the report this was written against (its `workspaces` module panics on startup
-# under scroll for reason 1, and reasons 2 and 3 are documented in a follow-up comment there with
-# source citations at v0.19.0). This module is not a workaround for one client: any strict sway
-# client hits reason 1, and reasons 2 and 3 are ordinary consequences of a compositor whose
-# workspace ids are container ids, which sway's are too.
-{ lib, config, ... }:
+# This module owns Nix integration only. The proxy implementation, layout-schema
+# translation, IPC framing, upstream discovery and runtime tests live in cscroll's
+# installed `scroll-swayipc-compat` program. In particular, this file contains no
+# generated Python, workspace synthesis, workspace-ID rewriting, empty-event
+# suppression or favourites policy.
+{ self }:
+{ lib, config, pkgs, ... }:
 let
   cfg = config.programs.scroll.ipcCompat;
-
-  favouritesLiteral = "[${lib.concatMapStringsSep ", " toString cfg.favorites}]";
-
-  shimSource = ''
-    #!${cfg.interpreter}
-    """scroll-swayipc-shim — makes scroll's IPC readable by strict sway clients.
-
-    GENERATED by nixscroll's homeManagerModules.ipcCompat. Do not edit: the next
-    home-manager generation overwrites it. The full account of what this rewrites
-    and why lives in that module (home/ipc-compat.nix).
-    """
-    import asyncio
-    import glob
-    import json
-    import os
-    import re
-    import socket
-    import struct
-    import sys
-
-    MAGIC = b"i3-ipc"
-    HDR = len(MAGIC) + 8
-
-    GET_WORKSPACES = 1
-    EVENT_WORKSPACE = 0x80000000
-
-    FAVOURITES = ${favouritesLiteral}
-
-    SUBS = [
-        (re.compile(rb'"layout"\s*:\s*"horizontal"'), b'"layout":"splith"'),
-        (re.compile(rb'"layout"\s*:\s*"vertical"'),   b'"layout":"splitv"'),
-    ]
-
-
-    def rewrite_layouts(payload: bytes) -> bytes:
-        for pat, rep in SUBS:
-            payload = pat.sub(rep, payload)
-        return payload
-
-
-    def rekey(ws: dict) -> dict:
-        """Numbered workspaces get id == num so a client can resolve them by number."""
-        num = ws.get("num")
-        if isinstance(num, int) and num > 0:
-            ws["id"] = num
-        return ws
-
-
-    def synthesise(workspaces: list) -> list:
-        """Add placeholder entries for favourites that do not exist yet."""
-        if not workspaces:
-            return workspaces
-        present = {w.get("num") for w in workspaces}
-        template = next((w for w in workspaces if w.get("focused")), workspaces[0])
-        out = list(workspaces)
-        for n in FAVOURITES:
-            if n in present:
-                continue
-            ph = json.loads(json.dumps(template))    # deep copy: schema guaranteed
-            ph.update({"id": n, "num": n, "name": str(n),
-                       "focused": False, "visible": False, "urgent": False})
-            for empty in ("nodes", "floating_nodes"):
-                if empty in ph:
-                    ph[empty] = []
-            if "representation" in ph:
-                ph["representation"] = None
-            out.append(ph)
-        out.sort(key=lambda w: (w.get("num", 0) < 0, w.get("num", 0)))
-        return out
-
-
-    def drop_frame(mtype: int, payload: bytes) -> bool:
-        """True if this frame should be swallowed rather than forwarded."""
-        if mtype != EVENT_WORKSPACE or not FAVOURITES:
-            return False
-        try:
-            data = json.loads(payload)
-        except (ValueError, TypeError):
-            return False
-        if data.get("change") != "empty":
-            return False
-        cur = data.get("current") or {}
-        return cur.get("num") in FAVOURITES
-
-
-    def transform(mtype: int, payload: bytes) -> bytes:
-        payload = rewrite_layouts(payload)
-        if not FAVOURITES:
-            return payload
-        if mtype == GET_WORKSPACES:
-            try:
-                data = json.loads(payload)
-                if isinstance(data, list):
-                    data = synthesise([rekey(w) for w in data])
-                    payload = json.dumps(data).encode()
-            except (ValueError, TypeError):
-                pass
-        elif mtype == EVENT_WORKSPACE:
-            try:
-                data = json.loads(payload)
-                for key in ("current", "old"):
-                    if isinstance(data.get(key), dict):
-                        data[key] = rekey(data[key])
-                payload = json.dumps(data).encode()
-            except (ValueError, TypeError, AttributeError):
-                pass
-        return payload
-
-
-    async def read_frame(r):
-        head = await r.readexactly(HDR)
-        if not head.startswith(MAGIC):
-            raise ValueError("bad magic — not a sway IPC stream")
-        length, mtype = struct.unpack("<II", head[len(MAGIC):])
-        return mtype, (await r.readexactly(length) if length else b"")
-
-
-    def frame(mtype: int, payload: bytes) -> bytes:
-        return MAGIC + struct.pack("<II", len(payload), mtype) + payload
-
-
-    async def pump(r, w, rewriting):
-        try:
-            while True:
-                mtype, payload = await read_frame(r)
-                if rewriting:
-                    if drop_frame(mtype, payload):
-                        continue
-                    payload = transform(mtype, payload)
-                w.write(frame(mtype, payload))
-                await w.drain()
-        except (asyncio.IncompleteReadError, ConnectionResetError,
-                ValueError, BrokenPipeError):
-            pass
-        finally:
-            try:
-                w.close()
-            except Exception:
-                pass
-
-
-    def upstream_candidates(listen):
-        """Upstream socket paths to try for a new client connection, in order.
-
-        Resolved per CONNECTION, never once at startup, and the difference is
-        the whole point. This process lives as long as the SESSION (PartOf=
-        graphical-session.target), but the compositor's socket path embeds the
-        compositor's PID — scroll can crash and come back many times inside one
-        session, and a path captured at startup then names a socket whose owner
-        is gone. What that looked like in practice: the proxy ran for days,
-        answered every client connect with an immediate close, and every bar
-        started after the first compositor restart ran with no workspace
-        switcher at all — nothing failed, nothing logged.
-
-        The environment values lead because they are the configured contract;
-        the glob over the compositor's socket pattern is what makes a restart
-        survivable. Three deliberate boundaries on it:
-
-          · Only inside $XDG_RUNTIME_DIR, never the /tmp fallback the LISTEN
-            path is allowed. Binding our own socket in /tmp is harmless;
-            DISCOVERING an upstream there would hand every client to whoever
-            planted a matching socket in a world-writable directory. No
-            runtime dir, no glob.
-
-          · Never `listen`, this proxy's own socket — in the environment or
-            the glob. socketName is free-form, and a name matching the
-            pattern would otherwise let the proxy dial itself once the real
-            candidates are gone, each accepted connection opening the next
-            until the fd limit.
-
-          · connect(2) decides liveness — a stale socket FILE outlives its
-            compositor, refuses, and falls through to the next candidate.
-            Liveness is not identity, though: newest mtime first makes the
-            current instance beat the leftovers, but a deliberately NESTED
-            compositor in the same runtime dir can still capture the glob.
-            That is why the environment stays first, and why a nested setup
-            should say what it means with SCROLL_REAL_SOCK.
-        """
-        out = []
-        for var in ("SCROLL_REAL_SOCK", "SWAYSOCK"):
-            path = os.environ.get(var)
-            if path and path != listen and path not in out:
-                out.append(path)
-
-        def mtime(path):
-            try:
-                return os.path.getmtime(path)
-            except OSError:
-                return 0.0
-
-        run = os.environ.get("XDG_RUNTIME_DIR")
-        found = glob.glob(os.path.join(run, "scroll-ipc.*.sock")) if run else []
-        for path in sorted(found, key=mtime, reverse=True):
-            if path != listen and path not in out:
-                out.append(path)
-        return out
-
-
-    async def connect_upstream(listen):
-        for path in upstream_candidates(listen):
-            try:
-                return await asyncio.open_unix_connection(path)
-            except OSError:
-                continue
-        return None
-
-
-    async def handle(cr, cw, listen):
-        pair = await connect_upstream(listen)
-        if pair is None:
-            cw.close()
-            return
-        ur, uw = pair
-        await asyncio.gather(pump(cr, uw, False), pump(ur, cw, True))
-
-
-    def sd_notify(state: str) -> None:
-        """Tell systemd the listening socket is bound, for `Type=notify`.
-
-        THE ONLY THING THAT MAKES A CLIENT'S `After=` ON THIS UNIT MEAN ANYTHING.
-        Ordering alone does not: every weaker `Type=` releases dependants at
-        `execve()`, which is before the interpreter has imported a module, let
-        alone bound a socket. A client started in that window connects to a path
-        that does not exist yet and gets ENOENT.
-
-        Never raises: a proxy that serves its clients correctly must not die
-        because it could not talk to the service manager.
-        """
-        addr = os.environ.get("NOTIFY_SOCKET")
-        if not addr:
-            return
-        # A leading '@' is systemd's spelling of the abstract namespace, which
-        # Python spells as a leading NUL.
-        if addr.startswith("@"):
-            addr = "\0" + addr[1:]
-        try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as s:
-                s.connect(addr)
-                s.sendall(state.encode())
-        except OSError:
-            pass
-
-
-    async def main():
-        listen = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
-            os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "${cfg.socketName}")
-        if os.path.exists(listen):
-            os.unlink(listen)
-        server = await asyncio.start_unix_server(
-            lambda r, w: handle(r, w, listen), path=listen)
-        print(f"shim: {listen} -> {upstream_candidates(listen) or 'no upstream yet'}"
-              f"  (favourites {FAVOURITES})", flush=True)
-        # AFTER `start_unix_server`, never before: the whole value of the
-        # notification is that the socket is already accepting when it is sent.
-        sd_notify("READY=1")
-        async with server:
-            await server.serve_forever()
-
-
-    if __name__ == "__main__":
-        try:
-            asyncio.run(main())
-        except KeyboardInterrupt:
-            pass
-  '';
+  defaultPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.scroll;
 in
 {
   options.programs.scroll.ipcCompat = {
     enable = lib.mkEnableOption ''
-      a sway-IPC compatibility proxy in front of scroll, for clients whose deserializer rejects
-      scroll's own layout names (see this module's header for the three rewrites and why each one
-      exists)
+      cscroll's strict-Sway IPC compatibility helper for clients whose
+      deserializer rejects Scroll's native horizontal and vertical layout names
     '';
 
-    interpreter = lib.mkOption {
-      type = lib.types.str;
-      default = "/usr/bin/env python3";
-      example = "/nix/store/…-python3-3.12.8/bin/python3";
+    package = lib.mkOption {
+      type = lib.types.package;
+      default = defaultPackage;
+      defaultText = lib.literalExpression
+        "inputs.nixscroll.packages.\${pkgs.stdenv.hostPlatform.system}.scroll";
       description = ''
-        What runs the generated script — written verbatim onto its shebang line.
-
-        The default suits every distro that ships Python in its base system, which is all of them
-        this repo's consumers run except one: on NixOS `/usr/bin/env python3` does not resolve, and
-        a NixOS consumer must set this to `"''${pkgs.python3}/bin/python3"`. Deliberately a plain
-        string and not a package: the module installs nothing and this is the only place the
-        interpreter is named, so a path is the whole of what is needed.
+        The cscroll package that provides bin/scroll-swayipc-compat. The package
+        is referenced by absolute store path; the helper never depends on PATH
+        and this module never renders a copy of its implementation.
       '';
     };
 
-    favorites = lib.mkOption {
-      type = lib.types.listOf lib.types.ints.positive;
-      default = [ ];
-      example = [ 1 2 3 4 5 ];
-      description = ''
-        Workspace NUMBERS that a client should always see, whether or not they currently exist.
-
-        Empty (the default) leaves the workspace list exactly as the compositor reports it and only
-        the layout rewrite runs — correct for a client that just wants to read the tree. Populate it
-        for a client with pinned workspace buttons: those numbers are then re-keyed to resolvable
-        ids, synthesised into `GET_WORKSPACES` when absent, and protected from the `change: "empty"`
-        event that would otherwise delete their buttons the first time you leave one.
-
-        Set the SAME numbers the client pins. A client-side "favourites" list on top of this is
-        redundant at best: this makes them look like ordinary workspaces, which is precisely what
-        makes the client's own code path work.
-      '';
+    executable = lib.mkOption {
+      type = lib.types.str;
+      readOnly = true;
+      default = "${cfg.package}/bin/scroll-swayipc-compat";
+      description = "Absolute path to cscroll's packaged IPC helper.";
     };
 
     socketName = lib.mkOption {
       type = lib.types.str;
       default = "scroll-swaycompat.sock";
-      description = "Socket basename, created inside $XDG_RUNTIME_DIR.";
+      description = "Socket basename, created inside XDG_RUNTIME_DIR.";
     };
 
     serviceName = lib.mkOption {
       type = lib.types.str;
       default = "scroll-ipc-compat";
       description = ''
-        Name of the generated systemd user service. Published as an option because a consumer has
-        to order a client after it (`Requires=`/`After=`) and should read the name from here rather
-        than restate it.
+        Name of the generated systemd user service. Clients can read this value
+        when declaring Requires= and After= rather than restating the name.
       '';
     };
 
@@ -393,11 +57,9 @@ in
       readOnly = true;
       default = "%t/${cfg.socketName}";
       description = ''
-        Where a client should point its `SWAYSOCK`, written with systemd's `%t` specifier
-        (`$XDG_RUNTIME_DIR`). Correct in both `ExecStart=` and `Environment=` of a user unit, which
-        is the only place it is needed — systemd expands specifiers in both.
-
-        POINTING A CLIENT HERE IS NOT ENOUGH ON ITS OWN. See `unsetVariables`.
+        Proxy socket for a strict client, using systemd's %t runtime-directory
+        specifier. A client sets SWAYSOCK to this value and must also unset the
+        variables listed by unsetVariables.
       '';
     };
 
@@ -406,27 +68,19 @@ in
       readOnly = true;
       default = [ "SCROLLSOCK" "I3SOCK" ];
       description = ''
-        Variables a client's unit must UNSET (`UnsetEnvironment=`) for `socketPath` to take effect.
-
-        Setting `SWAYSOCK` alone is inert. scroll exports `SCROLLSOCK` into the systemd user
-        environment, and a sway client library probes the socket variables in its own priority
-        order — so it finds the compositor-specific one first and connects straight past the proxy.
-        Nothing errors: the client simply behaves as though the shim were not installed, which is
-        indistinguishable from the shim being broken and is the single most likely way to lose an
-        afternoon to this module.
-
-        Read-only because the list is a property of what scroll exports, not a consumer's choice.
+        Variables a strict client's unit must unset. Scroll exports SCROLLSOCK,
+        and Sway IPC libraries probe it before the SWAYSOCK value pointing at the
+        proxy; leaving it set silently bypasses the helper.
       '';
     };
 
     command = lib.mkOption {
       type = lib.types.str;
       readOnly = true;
-      default = "${config.xdg.configHome}/scroll/scroll-swayipc-shim ${cfg.socketPath}";
+      default = "${cfg.executable} ${cfg.socketPath}";
       description = ''
-        The full command the generated service runs. Published so a consumer who would rather
-        declare the unit through their own session-service layer (nixdesktop's, for instance) can
-        do that and set `enableService = false`.
+        Complete command for the proxy. Published for consumers that declare the
+        service through another session-service owner and set enableService=false.
       '';
     };
 
@@ -434,82 +88,33 @@ in
       type = lib.types.bool;
       default = true;
       description = ''
-        Whether to render the systemd user service as well as the script.
-
-        True is right for nearly everyone: a proxy that is not running is a socket that does not
-        exist, and a client ordered after a unit that was never declared starts anyway and connects
-        to nothing. Set false only when the same unit is already being declared elsewhere — see
-        `command`.
+        Whether this module declares the systemd user service. Disable only when
+        another session integration declares the same command and lifecycle.
       '';
     };
   };
 
-  config = lib.mkIf cfg.enable (lib.mkMerge [
-    {
-      xdg.configFile."scroll/scroll-swayipc-shim" = {
-        text = shimSource;
-        executable = true;
-      };
-    }
+  config = lib.mkIf (cfg.enable && cfg.enableService) {
+    systemd.user.services.${cfg.serviceName} = {
+      Unit = {
+        Description = "Strict-Sway IPC compatibility for Scroll";
+        Documentation = [ "man:scroll-swayipc-compat(1)" ];
+        PartOf = [ "graphical-session.target" ];
 
-    (lib.mkIf cfg.enableService {
-      systemd.user.services.${cfg.serviceName} = {
-        Unit = {
-          Description = "sway-IPC compatibility proxy for scroll";
-          Documentation = [ "https://github.com/JakeStanger/ironbar/issues/1584" ];
-          PartOf = [ "graphical-session.target" ];
-          # ORDERED BEFORE THE TARGET COMPLETES, NOT AFTER IT, AND THIS IS NOT A STYLE CHOICE.
-          # This proxy exists to be depended on: its whole published contract (see `serviceName`)
-          # is that a client — a bar, a workspace widget — declares `Requires=`/`After=` on it.
-          # Those clients are themselves `WantedBy=graphical-session.target`, and systemd orders a
-          # target after the units it pulls in. So an `After=graphical-session.target` here closes
-          # a loop: target → client → proxy → target. systemd breaks such a loop by DELETING one
-          # job, silently, and the job it picked in practice was the client's:
-          #
-          #   Found ordering cycle: graphical-session.target/verify-active after bar.service/start
-          #     after scroll-ipc-compat.service/start - after graphical-session.target
-          #   Job bar.service/start deleted to break ordering cycle
-          #
-          # The bar then sits at `inactive (dead)` with nothing failed and nothing logged against
-          # it — it simply never appears after a reboot. `graphical-session-pre.target` gives the
-          # ordering that was actually wanted (not before the session exists) without being inside
-          # the cycle. `Requisite=` is gone for the same reason: it enqueues a verify-active job on
-          # graphical-session.target, which is the very node the loop closed through.
-          #
-          # Starting a moment early is harmless for the same reason a compositor RESTART mid-
-          # session is (see `upstream_candidates` in the shim): the upstream socket is resolved per
-          # client connection, never once at startup. Started before the compositor, the proxy
-          # binds its socket, notifies, and simply has no live candidate yet — an early ask is
-          # accepted and closed, exactly what the same client would get from a socket that does
-          # not exist. In practice even that is rare: the clients this proxy exists for are bars,
-          # which are Wayland clients and cannot come up before the compositor, whose IPC socket
-          # is bound before it serves its first Wayland client.
-          After = [ "graphical-session-pre.target" ];
-        };
-        Service = {
-          # `notify`, and nothing weaker will do. This unit's entire published contract is that a
-          # client may declare `Requires=`/`After=` on it and then find the socket there. `simple`
-          # releases dependants when the fork succeeds and `exec` when `execve()` does — both are
-          # BEFORE the interpreter has imported asyncio, let alone bound the socket. The proxy
-          # sends `READY=1` from `main()` immediately after `start_unix_server()` returns, so with
-          # `notify` the ordering finally means what a client reads it to mean.
-          #
-          # The window this closes is ~0.4s of interpreter startup, and losing it is not a degraded
-          # bar but a silently incomplete one: ironbar builds its `workspaces` module ONCE per bar,
-          # and a bar whose turn came up inside the window logs `failed to create module
-          # Workspaces: No such file or directory` and then runs all session with no workspace
-          # switcher at all, while a bar initialised a few hundred ms later has one. Do not weaken
-          # this to `exec` on the theory that clients retry — ironbar does not.
-          Type = "notify";
-          ExecStart = cfg.command;
-          # NOT the recovery path for a compositor restart — that needs no unit restart at all,
-          # upstream resolution being per-connection. This covers what can still kill the unit:
-          # a wrong `interpreter` (203/EXEC), a bind failure, the interpreter dying outright.
-          Restart = "on-failure";
-          RestartSec = 1;
-        };
-        Install.WantedBy = [ "graphical-session.target" ];
+        # Clients are commonly WantedBy=graphical-session.target and ordered
+        # after this unit. Ordering the helper after that same target closes a
+        # cycle through those clients; graphical-session-pre.target does not.
+        After = [ "graphical-session-pre.target" ];
       };
-    })
-  ]);
+      Service = {
+        # cscroll sends READY=1 only after binding the proxy socket, so After=
+        # means the path accepts connections rather than merely being exec'd.
+        Type = "notify";
+        ExecStart = cfg.command;
+        Restart = "on-failure";
+        RestartSec = 1;
+      };
+      Install.WantedBy = [ "graphical-session.target" ];
+    };
+  };
 }

@@ -4,19 +4,24 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
-    # scroll (github.com/dawsers/scroll) is NOT in nixpkgs, and this repo does not attempt to
-    # package it itself. github:Diax170/scroll-flake is the maintained, working packaging for it
-    # (overlays nixpkgs' own sway-unwrapped build with scroll's source — the same meson/wlroots
-    # build sway already uses, just pointed at a different tree). Taking it as a flake INPUT and
-    # passing the package straight through (see `packages.<system>.scroll` below) is a deliberate,
-    # documented exception to this family's usual single-nixpkgs-input rule: scroll has no home in
-    # nixpkgs for a `nixosModules.backend`-style module here to build against, so without this
-    # input every consumer of this repo would have to go solve scroll packaging on their own before
-    # `homeManagerModules.scroll` (config generation) or `nixosModules.scroll` (system install) had
-    # anything to point at. Full credit to Diax170 for the packaging — see README.
+    # Runtime source and Nix integration are separate products. cscroll is deliberately a plain
+    # source input: it contains Scroll, scrollmsg and tightly coupled runtime repairs, but no Nix
+    # module. corbet-labs/cscroll is the publication target; until it exists, local evaluation uses
+    # `--override-input cscroll path:/path/to/cscroll` and this repository commits no machine-local
+    # path. The lock entry is created only after that public source exists.
+    cscroll = {
+      url = "github:corbet-labs/cscroll";
+      flake = false;
+    };
+
+    # github:Diax170/scroll-flake remains the maintained build recipe. Its two source inputs both
+    # follow cscroll, so every package it exposes is built from our one runtime product rather than
+    # reaching around the boundary to dawsers/scroll. Full credit to Diax170 for the packaging.
     scroll-flake = {
       url = "github:Diax170/scroll-flake";
       inputs.nixpkgs.follows = "nixpkgs";
+      inputs.scroll-git.follows = "cscroll";
+      inputs.scroll-stable.follows = "cscroll";
     };
 
     # nixhost IS an input, for exactly one thing: `lib.probeFact` (github:julian-corbet/
@@ -34,7 +39,7 @@
     };
   };
 
-  outputs = { self, nixpkgs, scroll-flake, nixhost }:
+  outputs = { self, nixpkgs, scroll-flake, nixhost, ... }:
     let
       forAllSystems = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" ];
 
@@ -42,13 +47,67 @@
       # `nixhost` input comment above. The exported value is a plain home-manager module function
       # taking the usual `{ lib, config, ... }`; nothing about consuming it changes.
       scrollModule = import ./home/scroll.nix { inherit (nixhost.lib) probeFact; };
+      ipcCompatModule = import ./home/ipc-compat.nix { inherit self; };
     in
     {
-      # ── PACKAGING (passthrough, see the input comment above) ────────────────────────────────
-      packages = forAllSystems (system: {
-        scroll = scroll-flake.packages.${system}.default;
-        default = scroll-flake.packages.${system}.default;
-      });
+      # ── PACKAGING ───────────────────────────────────────────────────────────────────────────
+      # Keep scroll-flake's working Sway/wlroots recipe and replace only its source (through the
+      # input follows above). The scroll executable gets a deliberately narrow Mesa environment:
+      # a Nix-built compositor cannot otherwise find its EGL vendor and DRI drivers when launched
+      # on Arch. This does not wrap scrollmsg or the IPC helper and deliberately does not guess a
+      # hardware-specific Vulkan ICD. cscroll's temporary IPC helper is a Python program installed
+      # by the Meson build. Python is a native build input solely so patchShebangs can write one
+      # absolute store interpreter into that helper; it is not added to Scroll's runtime PATH.
+      packages = forAllSystems (system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          mesaEnvironment = {
+            eglVendor = "${pkgs.mesa}/share/glvnd/egl_vendor.d/50_mesa.json";
+            libglDrivers = "${pkgs.mesa}/lib/dri";
+          };
+          wrappedScroll = scroll-flake.packages.${system}.default.override {
+            # This hook is part of nixpkgs' sway wrapper and therefore affects only
+            # bin/scroll. Referencing pkgs.mesa here also attaches the driver closure.
+            extraSessionCommands = ''
+              export __EGL_VENDOR_LIBRARY_FILENAMES="${mesaEnvironment.eglVendor}"
+              export LIBGL_DRIVERS_PATH="${mesaEnvironment.libglDrivers}"
+            '';
+          };
+          scroll = wrappedScroll.overrideAttrs (old: {
+            nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.python3 ];
+            passthru = (old.passthru or { }) // {
+              # A small, evaluable packaging contract for checks and downstream diagnostics.
+              nixscrollMesaEnvironment = mesaEnvironment;
+            };
+            postFixup = (old.postFixup or "") + ''
+              helper="$out/bin/scroll-swayipc-compat"
+              if [[ ! -x "$helper" ]]; then
+                echo "nixscroll: cscroll did not install $helper" >&2
+                exit 1
+              fi
+              # scroll-flake's outer package is an lndir tree over the unwrapped
+              # build. Copy only this helper out of that tree before patching;
+              # patchShebangs intentionally does not rewrite a store symlink.
+              if [[ -L "$helper" ]]; then
+                helperSource="$(readlink -f "$helper")"
+                unlink "$helper"
+                cp "$helperSource" "$helper"
+                chmod u+w "$helper"
+              fi
+              patchShebangs "$helper"
+              expected='#!${pkgs.python3}/bin/python3'
+              actual="$(head -n 1 "$helper")"
+              if [[ "$actual" != "$expected" ]]; then
+                echo "nixscroll: unexpected IPC helper interpreter: $actual" >&2
+                exit 1
+              fi
+            '';
+          });
+        in
+        {
+          inherit scroll;
+          default = scroll;
+        });
 
       # ── SYSTEM SIDE ───────────────────────────────────────────────────────────────────────
       # Thin on purpose: installs the package and registers the wayland-sessions entry it ships,
@@ -58,11 +117,10 @@
       nixosModules.scroll = import ./modules/nixos.nix { inherit self; };
       nixosModules.default = self.nixosModules.scroll;
 
-      # Arch/CachyOS plane. scroll is not in nixpkgs, so unlike niri it cannot be resolved through
-      # nixdesktop's role table -- on NixOS this repo's own package output fills that gap, and on
-      # Arch the AUR package does. Declares the name into nixarch.packages.aur; nixarch's
-      # reconciler installs it. Config generation stays in homeManagerModules.scroll on both.
-      systemManagerModules.scroll = ./modules/system-manager.nix;
+      # Arch/CachyOS plane. Registers the cscroll derivation and full Scroll launch descriptor
+      # with nixdesktop; only optional wlroots companions are delegated to pacman. Config
+      # generation stays in homeManagerModules.scroll on both planes.
+      systemManagerModules.scroll = import ./modules/system-manager.nix { inherit self; };
       systemManagerModules.default = self.systemManagerModules.scroll;
 
       # ── CONFIG GENERATION ────────────────────────────────────────────────────────────────
@@ -73,18 +131,15 @@
         scroll = scrollModule;
         default = scrollModule;
 
-        # A proxy that makes scroll's IPC readable by clients whose deserializer validates against
-        # sway's schema. Separate module, separate opt-in: it is not config generation, it renders
-        # a program and a unit, and a consumer with no such client wants none of it. It is here
-        # rather than in each client's own project because scroll is the party that diverged from
-        # the schema — see home/ipc-compat.nix's header, and ironbar#1584.
-        ipcCompat = ./home/ipc-compat.nix;
+        # The proxy implementation is part of cscroll. This integration module only selects that
+        # packaged executable and declares its optional user unit.
+        ipcCompat = ipcCompatModule;
       };
 
       # ── CHECKS ────────────────────────────────────────────────────────────────────────────
       # `nix flake check` does NOT evaluate `homeManagerModules` or `systemManagerModules` — it
       # lists them as unchecked and moves on. Since config generation is what this repo is FOR,
-      # a green `flake check` here covered the package passthrough and the NixOS module while
+      # a green `flake check` here covered the package output and the NixOS module while
       # proving nothing at all about home/scroll.nix. This closes that gap by evaluating the module
       # for real against a minimal home-manager stub.
       #
@@ -102,11 +157,12 @@
           pkgs = nixpkgs.legacyPackages.${system};
           inherit scrollModule;
         };
-        # home/ipc-compat.nix. It writes a PROGRAM as text, so nothing else type-checks it, and its
-        # two most consequential values (the shebang, and the list of variables a client must
-        # unset) both fail silently rather than loudly — see the check's own header.
+        # Evaluates the IPC integration module and proves it references cscroll's executable rather
+        # than embedding runtime code or workspace policy in Nix.
         ipc-compat = import ./checks/ipc-compat.nix {
           pkgs = nixpkgs.legacyPackages.${system};
+          inherit ipcCompatModule;
+          scrollPackage = self.packages.${system}.scroll;
         };
         # Evaluates the nixdisplay.layouts/nixdisplay.monitors/nixdesktop.sessions translation --
         # transform inversion, identity-with-spaces quoting, alias fan-out, disabled outputs,

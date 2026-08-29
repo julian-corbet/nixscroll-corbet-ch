@@ -1,24 +1,37 @@
 # nixscroll
 
-Declarative config generation for [scroll](https://github.com/dawsers/scroll) — a fork of
+Declarative config generation for [cscroll](https://github.com/corbet-labs/cscroll), a deliberately
+close downstream of [scroll](https://github.com/dawsers/scroll) — a fork of
 [sway](https://github.com/swaywm/sway) with a scrolling, PaperWM-style tiling layout — plus the
-packaging and system wiring scroll needs since, unlike sway, it isn't in nixpkgs. Four outputs:
-a package passthrough, a home-manager module that writes `~/.config/scroll/config` from
-structured options, a thin NixOS module for the system side, and an Arch/CachyOS plane that names
-packages for a distro reconciler instead of installing any.
+packaging and system wiring it needs since Scroll is not in nixpkgs. Four outputs:
+a package built from cscroll, a home-manager module that writes `~/.config/scroll/config` from
+structured options, a thin NixOS module for the system side, and an Arch/CachyOS plane that
+registers cscroll with the compositor launcher and names optional companions for the distro
+reconciler.
 
 ## The split
 
 Four pieces, because scroll not being in nixpkgs is a real constraint that shapes the whole repo:
 
-**Packaging** (`packages.<system>.scroll`) — a straight passthrough of
-[Diax170/scroll-flake](https://github.com/Diax170/scroll-flake)'s own `packages.<system>.default`.
-This repo does not package scroll itself. Taking scroll-flake as a flake input and re-exporting
-its package is a deliberate exception to the usual rule of pinning exactly one `nixpkgs` and
-nothing else — see the comment at the top of [`flake.nix`](flake.nix) for the full reasoning.
-Full credit to [Diax170](https://github.com/Diax170) for the actual packaging work (an overlay
-that patches nixpkgs' own `sway-unwrapped` build to compile scroll's source instead); this repo
-only forwards it.
+**Packaging** (`packages.<system>.scroll`) — builds the non-flake `cscroll` source input through
+[Diax170/scroll-flake](https://github.com/Diax170/scroll-flake)'s maintained Sway/wlroots recipe.
+Both of scroll-flake's own source inputs follow `cscroll`, so the recipe cannot silently reach
+around the runtime-product boundary to upstream Scroll. Full credit to
+[Diax170](https://github.com/Diax170) for the packaging work; nixscroll selects the source and adds
+two narrow runtime provisions. Only the `scroll` executable exports Nix Mesa's EGL-vendor file and
+`LIBGL_DRIVERS_PATH`, which is required when this Nix-built compositor runs on Arch; no
+hardware-specific Vulkan ICD is guessed. The IPC helper's `/usr/bin/env python3` shebang is patched
+to an absolute Nix-store interpreter during fixup. Neither provision adds Python or Mesa tools to
+the compositor's runtime `PATH`, and neither wraps `scrollmsg` or the IPC helper.
+
+Until `corbet-labs/cscroll` exists publicly, evaluate a local checkout with an ephemeral override:
+
+```sh
+nix flake check --override-input cscroll path:/path/to/cscroll --no-write-lock-file
+```
+
+No machine-local path belongs in `flake.nix` or `flake.lock`. The real cscroll lock entry is made
+after publication.
 
 **Config generation** (`homeManagerModules.scroll`, namespace `programs.scroll`) — a home-manager
 module that renders `~/.config/scroll/config` from a structured option tree instead of hand-edited
@@ -28,39 +41,25 @@ for it. This is the module most consumers want.
 
 **System install** (`nixosModules.scroll`, same `programs.scroll` namespace) — installs the
 package and registers scroll as a selectable wayland-sessions entry for a display manager. Kept
-deliberately thin — no wrapper features, no XDG portal config, no extra packages. If you want
-that fuller sway.nix-style module, scroll-flake ships its own `nixosModules.default` under this
-same namespace; use one or the other, not both, since they'd both try to own `programs.scroll`.
+deliberately thin — no module-level wrapper customization, no XDG portal config, no extra
+packages. (The package itself still carries the fixed Mesa environment described above.) If you
+want that fuller sway.nix-style module, scroll-flake ships its own `nixosModules.default` under
+this same namespace; use one or the other, not both, since they'd both try to own
+`programs.scroll`.
 
-**Arch/CachyOS** (`systemManagerModules.scroll`, namespaces `nixscroll.install` and
-`nixscroll.portals`) — the same job as the NixOS module on a distro whose packages come from
-pacman, and therefore the opposite shape: it installs nothing and publishes NAMES into
-`nixarch.packages.{aur,pacman}`, because the distro's own copy is what actually runs. scroll itself
-is the AUR's `sway-scroll`; alongside it sit four optional companions. Three are wlroots tools —
-`swaybg`, `wlr-randr` and `xdg-desktop-portal-wlr` — each of which talks to a protocol extension
-scroll implements by being a sway fork, and is inert on a compositor that is not one. The fourth,
-`azote`, is the wallpaper picker: it speaks no wlroots protocol itself and belongs here because it
-drives `swaybg`, the binary the compositor already spawns, rather than replacing it. Each is its
-own boolean and all are off by default. The portal backend in particular is what provides screencast
-and screenshot on a wlroots session; a GNOME backend is written against Mutter's D-Bus API and does
-not serve them here.
+**Arch/CachyOS** (`systemManagerModules.scroll`, namespace `nixscroll.install`) — registers the
+full Scroll descriptor in `nixdesktop.launcher.compositors.scroll`, including this flake's cscroll
+derivation. The seated unit therefore executes the Nix-store compositor directly; it never falls
+back to the independent AUR `sway-scroll` build. The package's `scroll`-only wrapper keeps the Nix
+Mesa EGL/DRI closure usable on Arch, while nixgpu/nixdesktop retain device selection and cgroup
+ownership; no nixGL wrapper or Python runtime entry is added to the compositor's `PATH`.
 
-Installing that backend does not select it, which is why `nixscroll.portals.pin.enable` exists as a
-separate switch. `xdg-desktop-portal` resolves each interface through a `portals.conf`; failing
-that through the deprecated `UseIn` key matched against `XDG_CURRENT_DESKTOP`; and failing that
-through one last resort, which is `xdg-desktop-portal-gtk` *specifically*. On a scroll session
-there is no matching config file and no `XDG_CURRENT_DESKTOP`, so every interface resolves to
-gtk-or-nothing — and gtk implements neither `Screenshot` nor `ScreenCast`. An interface with no
-implementation is not exported on the bus at all, so a client asking for a screenshot finds no such
-interface, with no log line naming a portal, a backend, or a config file. An installed
-`xdg-desktop-portal-gnome` does not step in: the last resort considers only gtk, so it sits inert.
-The pin writes `/etc/xdg-desktop-portal/portals.conf` naming `wlr` for those two interfaces and a
-configurable fallback (`pin.fallback`, default `gtk`) for the rest.
-
-The `sway-scroll` package does ship a correct `scroll-portals.conf`, and it never loads: a
-`<desktop>-portals.conf` is only read when that name appears in `XDG_CURRENT_DESKTOP`, and nothing
-in a scroll session sets that variable. A plain `portals.conf` under `/etc` is read regardless, and
-outranks every `/usr/share` file if the variable is ever set later.
+Three optional companions remain Arch package names: `swaybg`, `wlr-randr`, and
+`xdg-desktop-portal-wlr`. Each is independent and off by default. Enabling the portal backend also
+writes `/etc/xdg-desktop-portal/scroll-portals.conf`, selecting `wlr` for ScreenCast and Screenshot
+and a configurable general fallback (`portal.fallback`, default `gtk`). This file is
+desktop-specific because nixdesktop's launcher now sets `XDG_CURRENT_DESKTOP=scroll`; nixscroll no
+longer writes a global `/etc/xdg-desktop-portal/portals.conf` override.
 
 Neither the config-generation module nor the NixOS module invents its own option namespace per
 project convention — both use `programs.scroll`, matching how nixpkgs itself names
@@ -71,11 +70,11 @@ project convention — both use `programs.scroll`, matching how nixpkgs itself n
 
 | Output | Class | Owns |
 |---|---|---|
-| `packages.<system>.scroll` | flake package | passthrough of `Diax170/scroll-flake`'s `packages.<system>.default` |
+| `packages.<system>.scroll` | flake package | cscroll source built with `Diax170/scroll-flake`'s recipe; includes `scroll`, `scrollmsg`, and `scroll-swayipc-compat` |
 | `homeManagerModules.scroll` (`.default`) | home-manager | `~/.config/scroll/config`, generated from `programs.scroll.*`. Installs nothing. |
-| `homeManagerModules.ipcCompat` | home-manager | a sway-IPC compatibility proxy (`programs.scroll.ipcCompat`) plus its user unit — see [Strict sway clients](#strict-sway-clients) below. Installs nothing. |
+| `homeManagerModules.ipcCompat` | home-manager | selects cscroll's packaged strict-Sway IPC helper (`programs.scroll.ipcCompat`) and optionally declares its user unit — see [Strict sway clients](#strict-sway-clients) below. Contains no proxy implementation. |
 | `nixosModules.scroll` (`.default`) | NixOS | `environment.systemPackages` + `services.displayManager.sessionPackages` for `programs.scroll.package` |
-| `systemManagerModules.scroll` (`.default`) | [system-manager](https://github.com/numtide/system-manager) (Arch/CachyOS) | package NAMES into `nixarch.packages.{aur,pacman}`: scroll itself from the AUR, plus the optional companions — `swaybg` (wallpaper), `azote` (the picker that drives it), `wlr-randr` (runtime output control), `xdg-desktop-portal-wlr` (the screencast/screenshot portal backend). Installs nothing; the host's reconciler does. Also `/etc/xdg-desktop-portal/portals.conf` when `nixscroll.portals.pin.enable` is set — the only file this module writes. |
+| `systemManagerModules.scroll` (`.default`) | [system-manager](https://github.com/numtide/system-manager) (Arch/CachyOS) | full `nixdesktop` compositor descriptor pointing at cscroll; optional Arch companions; desktop-specific `/etc/xdg-desktop-portal/scroll-portals.conf` when the portal backend is enabled |
 
 ## Not scroll's own named keymap modes
 
@@ -104,19 +103,20 @@ sway:    layout = splith | splitv | stacked | tabbed | output | dockarea | none
 
 `unknown variant 'vertical', expected one of ...`, and that part of the client is gone. Neither side
 is misbehaving: the compositor reports its own layout model honestly, and the client validates
-against the schema it was written for. It is scroll that diverged, so the fix lives here.
+against the schema it was written for. Scroll is the diverging runtime, so the repair belongs in
+cscroll rather than in a client or this Nix integration.
 
-`homeManagerModules.ipcCompat` puts a proxy in front of the compositor socket and rewrites three
-things on the way out. It **installs nothing** — the script is written as a config file and
-`interpreter` names what runs it (`/usr/bin/env python3` by default; a NixOS consumer sets
-`"${pkgs.python3}/bin/python3"`).
+The runtime repair lives in cscroll's installed `scroll-swayipc-compat` executable. It translates
+only the lossless schema pairs `horizontal` → `splith` and `vertical` → `splitv`, in the
+compositor-to-client direction, and recomputes frame lengths. `homeManagerModules.ipcCompat`
+contains no generated proxy program: it selects the cscroll package by absolute store path and
+optionally declares the user unit around it.
 
 ```nix
 imports = [ inputs.nixscroll.homeManagerModules.ipcCompat ];
 
 programs.scroll.ipcCompat = {
   enable = true;
-  favorites = [ 1 2 3 4 5 ];   # only if your client pins workspace buttons
 };
 ```
 
@@ -135,14 +135,9 @@ finds that one first and connects straight past the proxy. Nothing errors — th
 behaves as though the proxy were not installed, which is indistinguishable from the proxy being
 broken.
 
-`favorites` gates the other two rewrites and exists for clients with pinned workspace buttons. A
-compositor's workspace `id` is a **container** id, not the workspace number, so a client that has
-only ever seen a workspace by name parses the name as a number and then finds no workspace with
-that id — its focus call resolves to nothing and returns silently, and the click appears to do
-nothing at all. Those numbers are therefore re-keyed to `id == num`, synthesised into
-`GET_WORKSPACES` when the workspace does not exist yet, and shielded from the `change: "empty"`
-event that would otherwise delete their buttons the first time you leave one. Leave the list empty
-and only the layout rewrite runs.
+Workspace IDs, missing-workspace synthesis, pinned buttons and `change: "empty"` events are not
+rewritten. Those are client/UI policy and belong in a native client adapter such as cbar's, not in
+a compositor protocol bridge.
 
 Reported upstream as [ironbar#1584](https://github.com/JakeStanger/ironbar/issues/1584).
 
