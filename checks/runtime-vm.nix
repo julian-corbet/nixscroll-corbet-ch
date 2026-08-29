@@ -40,7 +40,8 @@ pkgs.testers.nixosTest {
         machine.succeed("command -v Xwayland")
 
     with subtest("the exact packaged binary accepts the fixture"):
-        machine.succeed("${scrollPackage}/bin/scroll --validate -c ${config} 2>&1 | tee /tmp/validate.log")
+        machine.succeed("install -d -m 0700 /run/cscroll-validate")
+        machine.succeed("XDG_RUNTIME_DIR=/run/cscroll-validate ${scrollPackage}/bin/scroll --validate -c ${config} 2>&1 | tee /tmp/validate.log")
         machine.fail("grep -E 'Unknown/invalid|Error on line|Failed to parse' /tmp/validate.log")
 
     with subtest("a Pixman headless compositor owns a new isolated socket"):
