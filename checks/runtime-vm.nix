@@ -113,7 +113,7 @@ pkgs.testers.nixosTest {
         )
         machine.succeed("systemctl is-active --quiet cscroll-compat.service")
         machine.succeed(
-            "SCROLLSOCK= SWAYSOCK=/run/cscroll-vm/compat.sock "
+            "env -u SCROLLSOCK SWAYSOCK=/run/cscroll-vm/compat.sock "
             "${scrollPackage}/bin/scrollmsg -t get_workspaces "
             "| tee /run/cscroll-proxy.json "
             "| jq -e 'any(.[]; .num == 1 and .layout == \"splith\") "
