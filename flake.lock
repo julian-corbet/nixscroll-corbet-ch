@@ -3,11 +3,11 @@
     "cscroll": {
       "flake": false,
       "locked": {
-        "lastModified": 1787979940,
-        "narHash": "sha256-Vg/WT7Cz9nFd9pfp801hHckM4i2RDb3H0lY5l/l5Pu8=",
+        "lastModified": 1788086123,
+        "narHash": "sha256-i9dJOXPcNtH/PAZHhrjJIKFyFMzuq1mDMo4HOvH6YT4=",
         "owner": "corbet-labs",
         "repo": "cscroll",
-        "rev": "9d404cc3a46e9becdaaaad202dcd44803e684e3b",
+        "rev": "cc4696f6592c2f417952309699b1f75cfa884761",
         "type": "github"
       },
       "original": {

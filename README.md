@@ -123,7 +123,8 @@ imports = [ inputs.nixscroll.homeManagerModules.ipcCompat ];
 
 programs.scroll.ipcCompat = {
   enable = true;
-  favorites = [ 1 2 3 4 5 ];
+  # Zero is a real numbered Scroll/Sway workspace, not an alias for 10.
+  favorites = [ 0 1 2 3 4 5 ];
 };
 ```
 
