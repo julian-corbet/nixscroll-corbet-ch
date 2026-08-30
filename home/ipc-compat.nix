@@ -56,12 +56,12 @@ in
     };
 
     favorites = lib.mkOption {
-      type = lib.types.listOf lib.types.ints.unsigned;
+      type = lib.types.listOf lib.types.ints.positive;
       default = [ ];
       apply = lib.unique;
-      example = [ 0 1 2 3 4 5 ];
+      example = [ 1 2 3 4 5 ];
       description = ''
-        Non-negative numbered workspaces that the cscroll helper should retain for
+        Positive numbered workspaces that the cscroll helper should retain for
         strict workspace clients. The helper rekeys real numbered workspaces,
         synthesizes absent favourites, and suppresses their empty events.
         Leave empty when the client implements its own pinned-workspace policy.
