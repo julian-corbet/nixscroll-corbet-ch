@@ -73,7 +73,7 @@ let
       && !(cfg ? interpreter);
     "workspace favourites must be non-negative" =
       !(builtins.tryEval
-        (evalWith { enable = true; favorites = [ -1 ]; }).programs.scroll.ipcCompat.command).success;
+        (evalWith { enable = true; favorites = [ (-1) ]; }).programs.scroll.ipcCompat.command).success;
 
     # The source follows are the package boundary. The outer build gate both
     # checks that cscroll installed the helper and makes its interpreter a
