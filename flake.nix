@@ -229,6 +229,10 @@
           nixosModule = self.nixosModules.scroll;
         };
       } // nixpkgs.lib.optionalAttrs (system == "x86_64-linux") {
+        runtime-lifetime = import ./checks/runtime-lifetime.nix {
+          pkgs = nixpkgs.legacyPackages.${system};
+          scrollUnwrapped = scroll-flake.packages.${system}.scroll-git-unwrapped;
+        };
         runtime-vm = import ./checks/runtime-vm.nix {
           pkgs = nixpkgs.legacyPackages.${system};
           nixosModule = self.nixosModules.scroll;
