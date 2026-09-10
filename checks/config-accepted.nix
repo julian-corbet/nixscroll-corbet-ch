@@ -70,6 +70,7 @@ let
       };
 
       layout = {
+        followOutput = true;
         defaultOrientation = "horizontal";
         defaultWidth = 0.5;
         defaultHeight = 1.0;

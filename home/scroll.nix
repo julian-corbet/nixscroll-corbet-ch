@@ -121,6 +121,7 @@ let
   ];
 
   layoutLines = filter (x: x != null) [
+    (optionalIf (cfg.layout.followOutput != null) "layout_follow_output ${yn cfg.layout.followOutput}")
     (optionalIf (cfg.layout.defaultOrientation != null) "default_orientation ${cfg.layout.defaultOrientation}")
     (optionalIf (cfg.layout.defaultWidth != null) "layout_default_width ${toString cfg.layout.defaultWidth}")
     (optionalIf (cfg.layout.defaultHeight != null) "layout_default_height ${toString cfg.layout.defaultHeight}")
@@ -688,6 +689,11 @@ in
         type = types.nullOr (types.enum [ "horizontal" "vertical" "auto" ]);
         default = null;
         description = "`default_orientation horizontal|vertical|auto` — the default container layout for new tiled containers.";
+      };
+      followOutput = mkOption {
+        type = types.nullOr types.bool;
+        default = null;
+        description = "Transpose existing tiled workspaces and insertion mode to the destination output layout on moves, unplug and hotplug.";
       };
       defaultWidth = mkOption {
         type = types.nullOr num;
